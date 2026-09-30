@@ -138,6 +138,9 @@ extension ChatSessionSidebar {
                 Button(group.name) { self.runSidebarBatch(.category(group.name), rows: rows) }
             }
             Button(String(localized: "Remove from group")) { self.runSidebarBatch(.category(nil), rows: rows) }
+            Divider()
+            Button(String(localized: "New group…")) { self.promptSidebarBatchGroup(rows: rows) }
+                .disabled(self.batch.connection?.allows("sessions.groups.put") != true)
         }.disabled(self.batch.connection?.allows("sessions.patchMany") != true)
         Button(archived ? String(localized: "Restore") : String(localized: "Archive")) {
             self.runSidebarBatch(.archived(!archived), rows: rows)
@@ -153,6 +156,24 @@ extension ChatSessionSidebar {
                 mainSessionKey: self.viewModel.selectedAgentMainSessionKey) ||
                 self.batch.connection?
                 .allows("sessions.delete", scope: archived ? "operator.write" : "operator.admin") != true)
+    }
+
+    private func promptSidebarBatchGroup(rows: [OpenClawChatSessionEntry]) {
+        guard !self.batch.busy, let connection = self.batch.connection else { return }
+        let scope = self.batch.scope
+        let alert = NSAlert()
+        alert.messageText = String(localized: "New group")
+        let field = NSTextField(string: "")
+        field.frame.size = NSSize(width: 260, height: 24)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        alert.addButton(withTitle: String(localized: "Create group"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn,
+              scope == self.batch.scope, connection.isCurrent() else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        self.runSidebarBatch(.newGroup(name), rows: rows)
     }
 
     func loadInteractionGroups() async throws -> [OpenClawChatSessionGroup] {
@@ -219,6 +240,7 @@ extension ChatSessionSidebar {
         }
         self.batch.pendingDelete = []
         self.interact({ await self.batch.run(action, rows: rows, mainKey: mainKey, connection: $0) }) { successful in
+            if case .newGroup = action { self.groupRefreshNonce += 1 }
             if action == .delete { for row in successful {
                 owner?.remove(row)
             } }

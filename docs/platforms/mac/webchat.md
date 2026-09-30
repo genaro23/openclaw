@@ -65,6 +65,10 @@ The full native chat window is a split view:
 - **Voice controls**: the composer can start or stop the existing macOS Talk Mode without replacing its menu-bar overlay. While Talk Mode is active, the composer shows its listening/thinking/speaking state, live audio activity, and an expandable rolling transcript. Right-click the Talk button to choose **System Default** or a connected microphone; this is the same microphone selection used by Voice Wake and push-to-talk. If a selected microphone disconnects, the active Talk session falls back to the system default and tries the selection again the next time Talk Mode starts. A separate microphone action records a voice note when Talk Mode does not own audio capture.
 
 The sidebar loads threads in pages; choose **Load more** to reach older threads.
+Command-click or Shift-click to select several root threads, then choose
+**Actions → Move to group → New group…** to create a group and move the selection.
+If some moves fail, the group and completed moves remain; affected rows show
+errors so you can retry.
 Typing filters loaded rows immediately, then searches session names, metadata,
 and messages on the Gateway. Results appear in relevance order. Notices explain
 when message indexing is still in progress or archived transcripts are excluded.
