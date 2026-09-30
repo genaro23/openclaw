@@ -124,6 +124,7 @@ struct ChatSessionSidebar: View {
             prompt: String(localized: "Search threads"))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) { self.batchBar
+                self.archiveUndoNotice
                 self.connectionFooter
             }
         }

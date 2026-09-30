@@ -70,7 +70,7 @@ extension ChatSessionSidebar {
         self.interactionSections.flatMap(\.nodes).flatMap(\.previewSessions).map(self.batchTarget)
     }
 
-    private func isCurrentInteractionRow(_ row: OpenClawChatSessionEntry) -> Bool {
+    func isCurrentInteractionRow(_ row: OpenClawChatSessionEntry) -> Bool {
         self.viewModel.matchesCurrentSessionKey(
             incoming: row.key,
             agentId: row.agentId,
@@ -114,16 +114,20 @@ extension ChatSessionSidebar {
                     Button(String(localized: "Done")) { self.batch.selection = .init() }
                         .disabled(self.batch.busy)
                 }
-                if self.batch.busy { ProgressView().controlSize(.small) }
             }
+            if !self.batch.pendingArchives.isEmpty { ProgressView(String(localized: "Archiving…")).controlSize(.small) }
+            else if self.batch.busy { ProgressView().controlSize(.small) }
             if !self.batch.errors.isEmpty {
                 Text(String(localized: "Some thread operations failed. See the affected rows and try again."))
                     .foregroundStyle(.red)
             }
-            ForEach(self.batch.notices, id: \.self) { Text(verbatim: $0) }
+            ForEach(Array(Set(self.batch.notices + Array(self.batch.errors.values))).sorted(), id: \.self) {
+                Text(verbatim: $0)
+            }
         }
         .font(OpenClawChatTypography.caption)
-        .padding(self.batch.selection.active || !self.batch.errors.isEmpty ? 8 : 0)
+        .padding(self.batch.selection.active || !self.batch.errors.isEmpty || self.batch.busy || !self.batch
+            .pendingArchives.isEmpty ? 8 : 0)
     }
 
     @ViewBuilder var batchMenu: some View {
@@ -204,8 +208,9 @@ extension ChatSessionSidebar {
         }
     }
 
-    private func interact<T>(
+    func interact<T>(
         refresh: Bool = true,
+        refreshAcrossQueries: Bool = false,
         _ operation: @escaping @MainActor (OpenClawSessionMenuConnection) async throws -> T,
         apply: @escaping @MainActor (T) -> Void)
     {
@@ -218,9 +223,10 @@ extension ChatSessionSidebar {
             do {
                 guard scope == self.batch.scope else { return }
                 let result = try await operation(connection)
-                guard scope == self.batch.scope, connection.isCurrent() else { return }
-                apply(result)
-                if refresh {
+                guard connection.isCurrent() else { return }
+                let currentQuery = scope == self.batch.scope
+                if currentQuery { apply(result) }
+                if refresh, currentQuery || refreshAcrossQueries {
                     self.viewModel.refreshSessions(limit: 200)
                     self.viewModel.refreshSidebarData()
                 }
@@ -239,12 +245,18 @@ extension ChatSessionSidebar {
             return
         }
         self.batch.pendingDelete = []
-        self.interact({ await self.batch.run(action, rows: rows, mainKey: mainKey, connection: $0) }) { successful in
+        self.interact(refreshAcrossQueries: action == .archived(true), { connection in
+            let successful = await self.batch.run(action, rows: rows, mainKey: mainKey, connection: connection)
+            if action == .archived(true), successful.contains(where: self.isCurrentArchiveTarget) {
+                self.viewModel.switchSession(to: self.viewModel.selectedAgentMainSessionKey)
+            }
+            return successful
+        }) { successful in
             if case .newGroup = action { self.groupRefreshNonce += 1 }
             if action == .delete { for row in successful {
                 owner?.remove(row)
             } }
-            if action == .delete || action == .archived(true),
+            if action == .delete,
                successful.contains(where: self.isCurrentInteractionRow)
             { self.viewModel.switchSession(to: mainKey) }
             if action == .delete || action ==

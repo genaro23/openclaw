@@ -136,6 +136,13 @@ archived sessions, and cloud placement, including disk pressure and workspace
 conflicts. Hover a row or give it keyboard focus to reveal **Pin**/**Unpin** and
 **Archive**/**Restore** actions.
 
+Archiving from the sidebar offers **Undo** for six seconds; hovering or focusing
+the notice pauses that countdown. Undo restores the captured thread and its
+previous pin state, including successful threads from a partial batch archive.
+It remains available while you change conversations, filters, or agents, and
+leaves the current conversation selected. Reconnecting retires the action; if a
+thread was replaced before Undo, the failure stays visible.
+
 **Show message preview**, **Show automation sessions**, and **Show system sessions**
 are off by default. Automation sessions are cron conversations; system sessions
 are identified from their recorded creation source. Human-created and named
