@@ -6,7 +6,8 @@ extension ChatSessionSidebar {
         for node: ChatSessionSidebarModel.Node,
         isChild: Bool,
         now: Date,
-        previewRequest: ChatSessionSidebarPreviews.Request) -> some View
+        previewRequest: ChatSessionSidebarPreviews.Request,
+        menu: AnyView? = nil) -> some View
     {
         let session = node.session
         let attention = self.attentionSummary(sessions: node.previewSessions, now: now)
@@ -40,7 +41,13 @@ extension ChatSessionSidebar {
             }
             // The tag type must equal the List selection type (String?) exactly.
             .tag(Optional(session.key))
-            .contextMenu { self.contextMenu(for: session, isChild: isChild) }
+            .contextMenu {
+                if let menu {
+                    menu
+                } else {
+                    self.contextMenu(for: session, isChild: isChild)
+                }
+            }
             .modifier(ChatSidebarAttentionAccessibility(
                 title: ChatSessionSidebarModel.sidebarDisplayName(for: session),
                 targetID: targetID,

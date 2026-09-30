@@ -106,7 +106,8 @@ struct ChatSessionSidebar: View {
                 }
             }
             if let data = self.rosterData { ChatSessionSidebarRosterState(data: data) }
-            if sections.isEmpty, self.rosterData?.isSettled != false {
+            self.catalogSections(now: now, previewRequest: previewRequest)
+            if sections.isEmpty, self.catalogPresentation.catalogs.isEmpty, self.rosterData?.isSettled != false {
                 Text(self.query
                     .isEmpty ? String(localized: "No threads yet") : String(localized: "No matching threads"))
                     .font(OpenClawChatTypography.caption)

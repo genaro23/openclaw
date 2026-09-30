@@ -44,7 +44,8 @@ extension MacGatewayChatTransport: OpenClawSidebarCatalogTransport {
                             request: { request in
                                 try await self.connection.request(request, ifCurrentServerLease: lease)
                             },
-                            isCurrent: { self.connection.serverLeaseMatchesCurrentState(lease) })))
+                            isCurrent: { self.connection.serverLeaseMatchesCurrentState(lease) },
+                            openSources: { self.openCatalogSources(lease: lease) })))
                     case let .event(event) where changedEvents && event.event == "sessions.catalog.changed":
                         continuation.yield(.changed(event.payload?.dictionaryValue?["agentId"]?.stringValue))
                     default: break
@@ -54,5 +55,33 @@ extension MacGatewayChatTransport: OpenClawSidebarCatalogTransport {
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
+    }
+
+    @MainActor
+    private func openCatalogSources(lease: GatewayConnection.ServerLease) {
+        Task { @MainActor in
+            guard self.connection.serverLeaseMatchesCurrentState(lease),
+                  let target = await self.catalogDashboardTarget(),
+                  self.connection.serverLeaseMatchesCurrentState(lease)
+            else { return }
+            // ui/src/pages/config/route-data.ts:29; the native Dashboard handoff supports path/query only.
+            await DashboardManager.shared.show(
+                atPath: DashboardRouteMap.appearanceSettingsPath,
+                search: "?section=__appearance__",
+                target: target,
+                ifCurrent: { self.connection.serverLeaseMatchesCurrentState(lease) })
+        }
+    }
+
+    private func catalogDashboardTarget() async -> DashboardGatewayTarget? {
+        if self.connection === GatewayConnection.shared { return .primary }
+        let fleet = MacGatewayConnectionFleet.shared
+        if await fleet.existingLocalConnection() === self.connection { return .local }
+        for profileID in await fleet.boundProfileIDs()
+            where await fleet.existingConnection(profileID: profileID) === self.connection
+        {
+            return .profile(profileID)
+        }
+        return nil
     }
 }

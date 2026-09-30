@@ -19,6 +19,13 @@ final class ChatSessionSidebarCatalogs {
         let message: String?
     }
 
+    private struct Discovery {
+        let head: String
+        let cursor: String
+        let depth: Int
+        let cursors: Set<String>
+    }
+
     private(set) var catalogs: [SessionCatalog] = []
     private(set) var connection: OpenClawSidebarCatalogConnection?
     private(set) var loading: Set<String> = []
@@ -27,12 +34,14 @@ final class ChatSessionSidebarCatalogs {
     private(set) var grouping = Grouping.project
     private(set) var agentID = ""
     var isRendered = false
+    @ObservationIgnored var hasVisibleRows: (SessionCatalog) -> Bool = { $0.hosts.contains { !$0.sessions.isEmpty } }
     private var generation = UUID()
     private var observation = UUID()
     private var refreshRevision = 0
     private var revisions: [String: Int] = [:]
     private var pageDepths: [String: [String: Int]] = [:]
     private var visited: [String: [String: Set<String>]] = [:]
+    private var discovery: [String: [String: Discovery]] = [:]
     private var refreshTask: Task<Void, Never>?
     private var refreshPhase = RefreshPhase.idle
     private var preferenceKey: String?
@@ -91,6 +100,7 @@ final class ChatSessionSidebarCatalogs {
         self.refreshPhase = .idle
         self.connection = nil
         self.loading = []
+        self.discovery = [:]
     }
 
     private func resetCatalogs() {
@@ -161,7 +171,7 @@ final class ChatSessionSidebarCatalogs {
                         for _ in 0..<(self.pageDepths[catalog.id]?[host.hostid] ?? 0) {
                             guard self.current(generation), revision == self.refreshRevision else { return }
                             guard eligible(catalog.id) else { break }
-                            guard let cursor = expanded.nextcursor else { break }
+                            guard let cursor = expanded.nextcursor, !cursor.isEmpty else { break }
                             guard seen.insert(cursor).inserted else { throw self.pageError() }
                             let page = try await self.request(.catalogList(
                                 agentID: self.agentID, catalogID: catalog.id, cursors: [host.hostid: cursor]))
@@ -189,26 +199,68 @@ final class ChatSessionSidebarCatalogs {
             guard self.current(generation), revision == self.refreshRevision else { return }
             let retained = self.catalogs.filter { !eligible($0.id) }
             self.catalogs = fresh.compactMap { catalog in
-                eligible(catalog.id) ? catalog : retained.first { $0.id == catalog.id }
+                eligible(catalog.id) ? self.resumeDiscovery(catalog) : retained.first { $0.id == catalog.id }
             } + retained.filter { old in !fresh.contains { $0.id == old.id } }
+            self.discovery = self.discovery.filter { id, _ in self.catalogs.contains { $0.id == id } }
             self.errors = self.errors.filter { $0.key != "" && !eligible($0.key) }
             self.errors.merge(errors.filter { eligible($0.key) }, uniquingKeysWith: { _, next in next })
             for catalog in fresh where eligible(catalog.id) {
                 self.visited[catalog.id] = visited[catalog.id]
             }
+            await self.discoverHiddenPages(generation: generation, revision: revision)
         } catch {
             guard self.current(generation), revision == self.refreshRevision else { return }
             self.errors[""] = error.localizedDescription
         }
     }
 
-    func loadMore(_ catalogID: String) async {
-        guard let catalog = self.catalogs.first(where: { $0.id == catalogID }),
-              !self.loading.contains(catalogID), self.connection != nil else { return }
-        let cursors = Dictionary(uniqueKeysWithValues: catalog.hosts.compactMap { host in
-            host.nextcursor.map { (host.hostid, $0) }
+    private func resumeDiscovery(_ catalog: SessionCatalog) -> SessionCatalog {
+        self.discovery[catalog.id] = self.discovery[catalog.id]?
+            .filter { id, _ in catalog.hosts.contains { $0.hostid == id } }
+        return Self.replacing(catalog, hosts: catalog.hosts.map { host in
+            guard let sweep = self.discovery[catalog.id]?[host.hostid],
+                  catalog.error == nil, host.error == nil, host.pending != true else { return host }
+            // app-sidebar-session-catalog-live.ts:157 rechecks the head instead of replaying an empty prefix.
+            guard host.sessions.isEmpty, host.nextcursor == sweep.head else {
+                self.discovery[catalog.id]?[host.hostid] = nil
+                return host
+            }
+            return Self.replacing(host, rows: host.sessions, cursor: sweep.cursor)
         })
-        guard !cursors.isEmpty else { return }
+    }
+
+    private func discoverHiddenPages(generation: UUID, revision: Int) async {
+        var stopped: [String: Set<String>] = [:]
+        while self.current(generation), revision == self.refreshRevision {
+            var requested = false
+            for catalog in self.catalogs where !self.hidden.contains(catalog.id) && catalog.error == nil &&
+                !self.loading.contains(catalog.id) && !self.hasVisibleRows(catalog)
+            {
+                let hosts = Set(catalog.hosts.filter {
+                    $0.nextcursor?.isEmpty == false && $0.pending != true && $0.error == nil &&
+                        stopped[catalog.id]?.contains($0.hostid) != true
+                }.map(\.hostid))
+                guard !hosts.isEmpty else { continue }
+                requested = true
+                let advanced = await self.loadMore(catalog.id, hostIDs: hosts, discovering: true)
+                guard self.current(generation), revision == self.refreshRevision else { return }
+                stopped[catalog.id, default: []].formUnion(hosts.subtracting(advanced))
+            }
+            if !requested { return }
+        }
+    }
+
+    @discardableResult
+    func loadMore(_ catalogID: String, hostIDs: Set<String>? = nil, discovering: Bool = false) async -> Set<String> {
+        guard let catalog = self.catalogs.first(where: { $0.id == catalogID }),
+              !self.loading.contains(catalogID), self.connection != nil else { return [] }
+        let cursors: [String: String] = Dictionary(uniqueKeysWithValues: catalog.hosts.compactMap { host in
+            guard hostIDs?.contains(host.hostid) != false, let cursor = host.nextcursor,
+                  !cursor.isEmpty else { return nil }
+            return (host.hostid, cursor)
+        })
+        guard !cursors.isEmpty else { return [] }
+        var advanced = Set<String>()
         self.loading.insert(catalogID)
         self.revisions[catalogID, default: 0] += 1
         let revision = self.revisions[catalogID, default: 0]
@@ -222,20 +274,42 @@ final class ChatSessionSidebarCatalogs {
         do {
             let page = try await self.request(.catalogList(
                 agentID: self.agentID, catalogID: catalogID, cursors: cursors))
-            guard self.current(generation), revision == self.revisions[catalogID, default: 0] else { return }
+            guard self.current(generation), revision == self.revisions[catalogID, default: 0] else { return [] }
             self.errors.removeValue(forKey: catalogID)
             let hosts = catalog.hosts.map { host in
                 guard let cursor = cursors[host.hostid] else { return host }
                 do {
                     let next = try self.pageHost(page, catalogID: catalogID, hostID: host.hostid)
-                    var seen = self.visited[catalogID]?[host.hostid] ?? []
+                    let sweep = self.discovery[catalogID]?[host.hostid]
+                    var seen = sweep?.cursors ?? self.visited[catalogID]?[host.hostid] ?? []
                     seen.insert(cursor)
-                    if let cursor = next.nextcursor, seen.contains(cursor) {
+                    let repeated = next.nextcursor.map(seen.contains) == true
+                    if repeated {
                         self.errors[catalogID] = self.pageError().message
+                        self.discovery[catalogID]?[host.hostid] = nil
+                    } else {
+                        advanced.insert(host.hostid)
+                        let depth = (sweep?.depth ?? self.pageDepths[catalogID]?[host.hostid] ?? 0) + 1
+                        // session-data-controller-catalog.ts:452 keeps wholly empty discovery pages out of replay depth.
+                        self.discovery[catalogID]?[host.hostid] = nil
+                        if discovering, host.sessions.isEmpty, next.sessions.isEmpty,
+                           self.pageDepths[catalogID]?[host.hostid] == nil
+                        {
+                            if let nextCursor = next.nextcursor, !nextCursor.isEmpty {
+                                self.discovery[catalogID, default: [:]][host.hostid] = Discovery(
+                                    head: sweep?.head ?? cursor, cursor: nextCursor, depth: depth, cursors: seen)
+                            }
+                        } else { self.pageDepths[catalogID, default: [:]][host.hostid] = depth }
                     }
                     self.visited[catalogID, default: [:]][host.hostid] = seen
-                    self.pageDepths[catalogID, default: [:]][host.hostid, default: 0] += 1
-                    return Self.replacing(next, rows: Self.merge(host.sessions, next.sessions), cursor: next.nextcursor)
+                    return Self.replacing(
+                        next,
+                        rows: Self.merge(host.sessions, next.sessions),
+                        cursor: next.nextcursor,
+                        error: repeated ? [
+                            "code": .init("PAGINATION_FAILED"),
+                            "message": .init(self.pageError().message ?? ""),
+                        ] : nil)
                 } catch {
                     if let message = self.errorText(error) { self.errors[catalogID] = message }
                     return Self.replacing(
@@ -250,6 +324,7 @@ final class ChatSessionSidebarCatalogs {
                 self.errors[catalogID] = error.localizedDescription
             }
         }
+        return advanced
     }
 
     @discardableResult
@@ -306,13 +381,13 @@ final class ChatSessionSidebarCatalogs {
         return Set(self.visible(archived: archived).flatMap(\.hosts).flatMap(\.sessions).compactMap(\.sessionkey))
     }
 
-    static func filtered(_ rows: [SessionCatalogSession], owner: String?, live: [OpenClawChatSessionEntry])
+    static func filtered(_ rows: [SessionCatalogSession], owner: String?, live: [String: OpenClawChatSessionEntry])
         -> [SessionCatalogSession]
     {
         guard let owner else { return rows }
         return rows.filter { row in
             // app-sidebar-session-catalogs.ts:157: an unset live owner also overrides cached creator metadata.
-            if let key = row.sessionkey, let live = live.first(where: { $0.key == key }) {
+            if let key = row.sessionkey, let live = live[key] {
                 return live.owner?.actor.id == owner
             }
             return row.createdactor?.id == owner
@@ -408,7 +483,7 @@ final class ChatSessionSidebarCatalogs {
     private static func replacing(
         _ host: SessionCatalogHost,
         rows: [SessionCatalogSession],
-        cursor: String?) -> SessionCatalogHost
+        cursor: String?, error: [String: AnyCodable]? = nil) -> SessionCatalogHost
     {
         .init(
             hostid: host.hostid,
@@ -420,7 +495,7 @@ final class ChatSessionSidebarCatalogs {
             canstartterminal: host.canstartterminal,
             sessions: rows,
             nextcursor: cursor,
-            error: host.error)
+            error: error ?? host.error)
     }
 }
 #endif

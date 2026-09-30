@@ -135,7 +135,7 @@ private final class CatalogTestFixture {
                 }
                 completion.send(Task.isCancelled)
                 return response
-            }, isCurrent: { true }))
+            }, isCurrent: { true }, openSources: {}))
         if let acknowledgedEvents { await acknowledgedEvents.send(event) }
         else { self.events.continuation.yield(event) }
         let call = await self.calls.next()
@@ -176,7 +176,7 @@ struct ChatSessionSidebarCatalogsTests {
         let task = Task { await fixture.owner.loadMore(id) }
         let call = await fixture.calls.next()
         call.reply.resume(returning: page)
-        await task.value
+        _ = await task.value
         return call.request
     }
 
@@ -231,6 +231,139 @@ struct ChatSessionSidebarCatalogsTests {
         #expect(self.rows(fixture, "alpha", "local") == ["a", "c"])
     }
 
+    @Test func `refresh stops at an empty terminal cursor when a held window shrinks`() async throws {
+        let fixture = try CatalogTestFixture()
+        defer { fixture.stop() }
+        let root = self.page([self.catalog("alpha", [self.host("local", [self.row("root")], cursor: "one")])])
+        await fixture.connect(root)
+        await self.load(
+            fixture,
+            "alpha",
+            self.page([self.catalog("alpha", [self.host("local", [self.row("mid")], cursor: "two")])]))
+        await self.load(fixture, "alpha", self.page([self.catalog("alpha", [self.host("local", [self.row("last")])])]))
+        var cursors: [String] = []
+        fixture.intercept = { call in
+            guard let cursor = (call.request.params["cursors"]?.value as? [String: String])?["local"]
+            else { return false }
+            cursors.append(cursor)
+            call.reply.resume(returning: self.page([self.catalog(
+                "alpha",
+                [self.host("local", [self.row("remaining")], cursor: "")])]))
+            return true
+        }
+        let refresh = Task { await fixture.owner.refresh() }
+        let call = await fixture.calls.next()
+        call.reply.resume(returning: root)
+        await refresh.value
+        #expect(cursors == ["one"])
+        #expect(self.rows(fixture, "alpha", "local") == ["root", "remaining"])
+        #expect(fixture.owner.errors.isEmpty)
+    }
+
+    @Test func `discovery reaches rows behind empty prefixes and retains their replay window`() async throws {
+        let fixture = try CatalogTestFixture()
+        defer { fixture.stop() }
+        var cursors: [String] = []
+        fixture.intercept = { call in
+            guard let cursor = (call.request.params["cursors"]?.value as? [String: String])?["local"]
+            else { return false }
+            cursors.append(cursor)
+            call.reply.resume(returning: self.page([self.catalog("alpha", [
+                cursor == "one" ? self.host("local", [], cursor: "two") : self.host("local", [self.row("found")]),
+            ])]))
+            return true
+        }
+        let head = self.page([self.catalog("alpha", [self.host("local", [], cursor: "one")])])
+        let waiting = await fixture.connect(head)
+        #expect(cursors == ["one", "two"])
+        #expect(self.rows(fixture, "alpha", "local") == ["found"])
+        fixture.clock.advance(waiting)
+        let root = await fixture.calls.next()
+        root.reply.resume(returning: head)
+        _ = await fixture.clock.waits.next()
+        #expect(cursors == ["one", "two", "one", "two"])
+        #expect(self.rows(fixture, "alpha", "local") == ["found"])
+    }
+
+    @Test func `empty discovery prefixes resume after head probes and reset when the head changes`() async throws {
+        let fixture = try CatalogTestFixture()
+        defer { fixture.stop() }
+        var cursors: [String] = []
+        fixture.intercept = { call in
+            guard let cursor = (call.request.params["cursors"]?.value as? [String: String])?["local"]
+            else { return false }
+            cursors.append(cursor)
+            let host = switch cursor {
+            case "a": self.host("local", [], cursor: "b")
+            case "c": self.host("local", [], cursor: "d")
+            default: self.host("local", [], error: true)
+            }
+            call.reply.resume(returning: self.page([self.catalog("alpha", [host])]))
+            return true
+        }
+        let head = self.page([self.catalog("alpha", [self.host("local", [], cursor: "a")])])
+        var waiting = await fixture.connect(head)
+        #expect(cursors == ["a", "b"])
+        for response in [
+            head,
+            self.page([self.catalog("alpha", [self.host("local", [], cursor: "c")])]),
+            self.page([self.catalog("alpha", [self.host("local", [self.row("new-head")])])]),
+        ] {
+            fixture.clock.advance(waiting)
+            let root = await fixture.calls.next()
+            root.reply.resume(returning: response)
+            waiting = await fixture.clock.waits.next()
+        }
+        #expect(cursors == ["a", "b", "b", "c", "d"])
+        #expect(self.rows(fixture, "alpha", "local") == ["new-head"])
+        #expect(fixture.owner.errors.isEmpty)
+    }
+
+    @Test func `discovery uses current owner visibility and stops when a matching row appears`() async throws {
+        let fixture = try CatalogTestFixture()
+        defer { fixture.stop() }
+        fixture.owner.hasVisibleRows = { catalog in
+            catalog.hosts.flatMap(\.sessions).contains { $0.createdactor?.id == "alice" }
+        }
+        var calls = 0
+        fixture.intercept = { call in
+            guard call.request.params["catalogId"] != nil else { return false }
+            calls += 1
+            call.reply.resume(returning: self.page([self.catalog("alpha", [self.host("local", [
+                self.row("match", extra: #", "createdActor":{"type":"human","id":"alice"}"#),
+            ], cursor: "still-more")])]))
+            return true
+        }
+        await fixture.connect(self.page([self.catalog("alpha", [self.host("local", [
+            self.row("other", extra: #", "createdActor":{"type":"human","id":"bob"}"#),
+        ], cursor: "one")])]))
+        #expect(calls == 1)
+        #expect(self.rows(fixture, "alpha", "local") == ["other", "match"])
+        #expect(fixture.owner.catalogs.first?.hosts.first?.nextcursor == "still-more")
+    }
+
+    @Test func `repeating discovery cursors stop only their host while another host progresses`() async throws {
+        let fixture = try CatalogTestFixture()
+        defer { fixture.stop() }
+        var requests: [[String: String]] = []
+        fixture.intercept = { call in
+            guard let cursors = call.request.params["cursors"]?.value as? [String: String] else { return false }
+            requests.append(cursors)
+            let hosts = cursors["stuck"] == nil
+                ? [self.host("healthy", [self.row("found")])]
+                : [self.host("stuck", [], cursor: "repeat"), self.host("healthy", [], cursor: "next")]
+            call.reply.resume(returning: self.page([self.catalog("alpha", hosts)]))
+            return true
+        }
+        await fixture.connect(self.page([self.catalog("alpha", [
+            self.host("stuck", [], cursor: "repeat"), self.host("healthy", [], cursor: "first"),
+        ])]))
+        #expect(requests == [["stuck": "repeat", "healthy": "first"], ["healthy": "next"]])
+        #expect(self.rows(fixture, "alpha", "healthy") == ["found"])
+        let stuck = try #require(fixture.owner.catalogs.first?.hosts.first { $0.hostid == "stuck" })
+        #expect(stuck.error?["code"]?.value as? String == "PAGINATION_FAILED")
+    }
+
     @Test(arguments: [false, true], ["NODE_OFFLINE", "UNAVAILABLE"])
     func `failed host pages retain their window and publish fresh host metadata`(
         refresh: Bool, code: String) async throws
@@ -250,7 +383,7 @@ struct ChatSessionSidebarCatalogsTests {
             let task = Task { await fixture.owner.refresh() }
             let call = await fixture.calls.next()
             call.reply.resume(returning: response)
-            await task.value
+            _ = await task.value
         } else {
             await self.load(fixture, "alpha", response)
         }
@@ -273,7 +406,7 @@ struct ChatSessionSidebarCatalogsTests {
         let stale = await fixture.calls.next()
         await fixture.connect(self.page([self.catalog("alpha", [self.host("local", [self.row("fresh")])])]))
         stale.reply.resume(returning: self.page([self.catalog("alpha", [self.host("local", [self.row("stale")])])]))
-        await loading.value
+        _ = await loading.value
         #expect(self.rows(fixture, "alpha", "local") == ["fresh"])
         #expect(fixture.owner.errors.isEmpty && fixture.owner.loading.isEmpty)
     }
@@ -306,7 +439,7 @@ struct ChatSessionSidebarCatalogsTests {
             #expect(self.rows(fixture, "alpha", "local") == ["held"])
         }
         page.reply.resume(returning: self.page([self.catalog("alpha", [self.host("local", [self.row("later")])])]))
-        await load.value
+        _ = await load.value
         if !rootFirst { root?.reply.resume(returning: response)
             await refresh.value
         }
@@ -342,7 +475,7 @@ struct ChatSessionSidebarCatalogsTests {
         #expect(await archive.value)
         #expect(self.rows(fixture, "alpha", "local") == ["keep"])
         page?.reply.resume(returning: self.page([self.catalog("alpha", [self.host("local", [self.row("delete")])])]))
-        await load.value
+        _ = await load.value
         root?.reply.resume(returning: self.page([self.catalog("alpha", [self.host("local", original)])]))
         await refresh.value
         #expect(self.rows(fixture, "alpha", "local") == ["keep"])
@@ -476,8 +609,16 @@ struct ChatSessionSidebarCatalogsTests {
         let live = try JSONDecoder().decode(
             OpenClawChatSessionEntry.self,
             from: Data(#"{"key":"agent:main:live"}"#.utf8))
-        #expect(ChatSessionSidebarCatalogs.filtered(rows, owner: "alias-a", live: [live])
+        #expect(ChatSessionSidebarCatalogs.filtered(rows, owner: "alias-a", live: [live.key: live])
             .map(\.threadid) == ["Thread:A/B"])
+        #expect(ChatSidebarCatalogPresentation.target(
+            catalogID: "Source:A",
+            hostID: "Host/B",
+            row: rows[0],
+            agentID: "MAIN").sessionKey ==
+            "agent:main:catalog:Source%3AA:Host%2FB:Thread%3AA%2FB")
+        #expect(ChatSidebarCatalogPresentation
+            .target(catalogID: "a", hostID: "b", row: rows[3], agentID: "MAIN").sessionKey == "agent:main:live")
     }
 
     @Test(arguments: [false, true])

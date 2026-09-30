@@ -8,10 +8,10 @@ extension ChatSessionSidebar {
 
     func rosterSections(observedOrder: ChatSessionSidebarModel.ObservedOrder) -> [ChatSessionSidebarModel.Section] {
         let data = self.rosterData
-        let adopted = self.catalogData.adoptedKeys(archived: data?.query.status == .archived)
-        let rows = (data?.rows ?? self.viewModel.sessions).filter { !adopted.contains($0.key) }
-        return ChatSessionSidebarModel.sections(
-            sessions: rows,
+        let adopted = data?.agentScope == .all || self.catalogData.agentID != self.viewModel.selectedAgentID ? [] :
+            self.catalogData.adoptedKeys(archived: data?.query.status == .archived)
+        let sections = ChatSessionSidebarModel.sections(
+            sessions: data?.rows ?? self.viewModel.sessions,
             currentSessionKey: self.viewModel.sessionKey,
             mainSessionKey: self.viewModel.selectedAgentMainSessionKey,
             activeAgentID: data?.query.agentID ?? (data == nil ? self.viewModel.selectedAgentID : nil),
@@ -27,6 +27,13 @@ extension ChatSessionSidebar {
                 showSystem: self.showSystemSessions,
                 showArchived: (data?.query.status ?? .active) != .active),
             observedOrder: observedOrder)
+        guard self.catalogData.isRendered else { return sections }
+        return ChatSidebarCatalogPresentation.ordinarySections(
+            sections, excluding: adopted, rankedSearch: data?.query.search.isEmpty == false,
+            currentKey: self.viewModel.sessionKey,
+            currentIsKnown: self.viewModel.rosterEntry(
+                key: self.viewModel.sessionKey,
+                agentID: self.viewModel.selectedAgentID) != nil)
     }
 }
 

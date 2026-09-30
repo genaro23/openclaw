@@ -17,16 +17,18 @@ public struct OpenClawSidebarCatalogConnection {
     let changedEvents: Bool
     let request: (OpenClawChatGatewayRequest) async throws -> Data
     let isCurrent: () -> Bool
+    let openSources: () -> Void
 
     public init(
         profileID: String, changedEvents: Bool,
         request: @escaping @MainActor (OpenClawChatGatewayRequest) async throws -> Data,
-        isCurrent: @escaping @MainActor () -> Bool)
+        isCurrent: @escaping @MainActor () -> Bool, openSources: @escaping @MainActor () -> Void)
     {
         self.profileID = profileID
         self.changedEvents = changedEvents
         self.request = request
         self.isCurrent = isCurrent
+        self.openSources = openSources
     }
 }
 

@@ -69,6 +69,7 @@ extension ChatSessionSidebar {
                 Toggle("Show message preview", isOn: self.$showMessagePreview)
                 Toggle("Show automation sessions", isOn: self.$showAutomationSessions)
                 Toggle("Show system sessions", isOn: self.$showSystemSessions)
+                ChatSidebarCatalogVisibilityOptions(data: self.catalogData, viewModel: self.viewModel)
             } label: {
                 Image(systemName: "line.3.horizontal.decrease")
                     .font(OpenClawChatTypography.caption)
