@@ -138,13 +138,8 @@ private struct ChatSessionSidebarRowMenu: View {
             Divider()
             Button(role: .destructive, action: self.delete) { Label("Delete…", systemImage: "trash") }
                 .keyboardShortcut("d", modifiers: [])
-                .disabled(!(self.session
-                        .isArchived || (self.session.hasActiveRun != true && self.session.isMain != true &&
-                            !["global", "unknown"].contains(self.session.kind ?? "") && self.session.key
-                            .lowercased() != "unknown" &&
-                            ChatSessionSidebarModel.canDeleteSession(
-                                key: self.session.key,
-                                mainSessionKey: self.viewModel.selectedAgentMainSessionKey))))
+                .disabled(!ChatSessionSidebarEligibility.canDelete(
+                    [self.session], mainSessionKey: self.viewModel.selectedAgentMainSessionKey))
             self.button(String(localized: "Get Info…"), "info.circle", action: self.inspect)
         }
         .font(OpenClawChatTypography.body(size: 13, weight: .regular, relativeTo: .body))
