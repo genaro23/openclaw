@@ -40,7 +40,7 @@ struct ChatSessionSidebar: View {
     }
 
     private func sidebar(now: Date) -> some View {
-        let sections = self.rosterSections(observedOrder: self.observedOrder)
+        let sections = self.interactionSections
         let previewRequest = ChatSessionSidebarPreviews.Request(
             viewModel: self.viewModel,
             sessions: sections.flatMap(\.nodes).flatMap(\.previewSessions))
@@ -61,6 +61,10 @@ struct ChatSessionSidebar: View {
                             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         {
                             self.rows(section.nodes, now: now, previewRequest: previewRequest)
+                                .modifier(ChatSidebarSectionInteraction(
+                                    sidebar: self,
+                                    section: section.id,
+                                    draggable: false))
                         }
                     } header: {
                         HStack(spacing: 6) {
@@ -78,6 +82,7 @@ struct ChatSessionSidebar: View {
                             self.attentionBadge(summary: attention, targetID: section.id)
                         }
                         .contextMenu { self.groupMenu(title) }
+                        .modifier(ChatSidebarSectionInteraction(sidebar: self, section: section.id))
                         .modifier(ChatSidebarAttentionAccessibility(
                             title: title,
                             targetID: section.id,
@@ -85,24 +90,22 @@ struct ChatSessionSidebar: View {
                             metadata: [],
                             presentation: self.$presentedAttention))
                     }
-                } else if let title = section.title {
-                    Section {
-                        self.rows(section.nodes, now: now, previewRequest: previewRequest)
-                    } header: {
-                        Text(LocalizedStringKey(title))
-                            .font(OpenClawChatTypography.caption)
-                    }
                 } else {
                     Section {
                         self.rows(section.nodes, now: now, previewRequest: previewRequest)
+                            .modifier(ChatSidebarSectionInteraction(
+                                sidebar: self,
+                                section: section.id,
+                                draggable: false))
                     } header: {
-                        Text("Recent")
+                        Text(LocalizedStringKey(section.title ?? "Recent"))
                             .font(OpenClawChatTypography.caption)
+                            .modifier(ChatSidebarSectionInteraction(sidebar: self, section: section.id))
                     }
                 }
             }
             if let data = self.rosterData { ChatSessionSidebarRosterState(data: data) }
-            if sections.isEmpty, self.rosterData?.isSettled != false {
+            if sections.allSatisfy(\.nodes.isEmpty), self.rosterData?.isSettled != false {
                 Text(self.query
                     .isEmpty ? String(localized: "No threads yet") : String(localized: "No matching threads"))
                     .font(OpenClawChatTypography.caption)
@@ -123,9 +126,14 @@ struct ChatSessionSidebar: View {
                 self.connectionFooter
             }
         }
+        .dropDestination(for: ChatSidebarDrag.self) { items, _ in
+            guard items.count == 1, let item = items.first else { return false }
+            return self.dropInteraction(item, section: "list", after: false)
+        }
         .onChange(of: self.viewModel.sidebarData?.scopeRevision) { _, _ in self.batch.reset() }
         .onChange(of: self.rosterData?.query) { _, _ in self.batch.reset(clearConnection: false) }
         .onChange(of: self.viewModel.sessionKey) { _, _ in self.batch.selection = .init() }
+        .task(id: self.viewModel.sidebarData?.scopeRevision) { await self.watchPinOrder() }
         .onChange(of: (self.rosterData?.rows ?? self.viewModel.sessions).map(\.key), initial: true) { _, keys in
             self.observedOrder.observe(keys)
         }
