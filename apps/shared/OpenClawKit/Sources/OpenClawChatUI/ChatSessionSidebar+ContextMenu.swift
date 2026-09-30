@@ -21,12 +21,12 @@ extension ChatSessionSidebar {
             set: { if !$0 { self.sessionPendingRename = nil } })
     }
 
-    func contextMenu(for session: OpenClawChatSessionEntry) -> some View {
+    func contextMenu(for session: OpenClawChatSessionEntry, isChild: Bool) -> some View {
         var session = session
         session.agentId = OpenClawChatSessionKey.agentID(from: session.key) ??
             self.viewModel.sessionMutationTarget(key: session.key, agentID: session.agentId).agentID
         return ChatSessionSidebarRowMenu(
-            viewModel: self.viewModel, session: session, groups: self.groups,
+            viewModel: self.viewModel, session: session, isChild: isChild, groups: self.groups,
             inspect: { self.inspectedSession = session },
             rename: {
                 self.renameText = session.label ?? session.displayName ?? ""
@@ -40,6 +40,7 @@ extension ChatSessionSidebar {
 private struct ChatSessionSidebarRowMenu: View {
     @Bindable var viewModel: OpenClawChatViewModel
     let session: OpenClawChatSessionEntry
+    let isChild: Bool
     let groups: [OpenClawChatSessionGroup]
     let inspect: () -> Void
     let rename: () -> Void
@@ -57,15 +58,17 @@ private struct ChatSessionSidebarRowMenu: View {
                         presentation: .named,
                         unitsStyle: .abbreviated))))
             }
-            self.button(
-                self.session.pinned == true ? String(localized: "Unpin") : String(localized: "Pin"),
-                "pin",
-                key: "p")
-            {
-                self.viewModel.setSessionPinned(
-                    key: self.session.key,
-                    pinned: self.session.pinned != true,
-                    agentID: self.session.agentId)
+            if ChatSessionSidebarEligibility.canPin(self.session, isChild: self.isChild) {
+                self.button(
+                    self.session.pinned == true ? String(localized: "Unpin") : String(localized: "Pin"),
+                    "pin",
+                    key: "p")
+                {
+                    self.viewModel.setSessionPinned(
+                        key: self.session.key,
+                        pinned: self.session.pinned != true,
+                        agentID: self.session.agentId)
+                }
             }
             self.button(String(localized: "Rename…"), "pencil", key: "r", action: self.rename)
             self.button(
@@ -94,7 +97,7 @@ private struct ChatSessionSidebarRowMenu: View {
                 .disabled(self.session.sessionId?.isEmpty != false ||
                     self.actions.connection?.allows("sessions.setInvolvement", scope: "operator.read") != true)
             }
-            if ChatSessionSidebarModel.canArchiveSession(
+            if ChatSessionSidebarEligibility.canArchive(
                 self.session,
                 mainSessionKey: self.viewModel.selectedAgentMainSessionKey)
             {
