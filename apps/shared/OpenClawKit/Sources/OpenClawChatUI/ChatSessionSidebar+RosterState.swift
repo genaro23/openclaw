@@ -24,7 +24,8 @@ extension ChatSessionSidebar {
                 sort: self.sessionSort,
                 showAutomation: self.showAutomationSessions,
                 showSystem: self.showSystemSessions,
-                showArchived: (data?.query.status ?? .active) != .active),
+                showArchived: (data?.query.status ?? .active) != .active,
+                selectedAgentID: self.viewModel.selectedAgentID),
             observedOrder: observedOrder)
     }
 }

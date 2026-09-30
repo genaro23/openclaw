@@ -10,7 +10,7 @@ extension ChatSessionSidebar {
     {
         let session = node.session
         let attention = self.attentionSummary(sessions: node.previewSessions, now: now)
-        let targetID = "session:\(session.key)"
+        let targetID = "session:\(self.interactionIdentity(session))"
         let facts = ChatSessionSidebarRowFacts(
             node: node,
             isChild: isChild,
@@ -22,6 +22,7 @@ extension ChatSessionSidebar {
         let content = ChatSidebarRow(
             node: node,
             isChild: isChild,
+            targetID: targetID,
             facts: facts,
             attention: attention,
             connected: self.viewModel.healthOK,
@@ -104,6 +105,7 @@ extension ChatSessionSidebar {
 private struct ChatSidebarRow: View {
     let node: ChatSessionSidebarModel.Node
     let isChild: Bool
+    let targetID: String
     let facts: ChatSessionSidebarRowFacts
     let attention: OpenClawChatAttentionSummary?
     let connected: Bool
@@ -180,7 +182,7 @@ private struct ChatSidebarRow: View {
             }
             if let attention = self.attention, !self.node.session.isArchived {
                 OpenClawChatAttentionBadge(
-                    summary: attention, targetID: "session:\(self.node.id)", presentation: self.$presentedAttention)
+                    summary: attention, targetID: self.targetID, presentation: self.$presentedAttention)
                     .accessibilityValue(self.leadingUnreadValue)
             } else if let glyph = self.facts.glyph {
                 self.graphic(glyph)

@@ -10,6 +10,7 @@ extension ChatSessionSidebarModel {
         var showAutomation = false
         var showSystem = false
         var showArchived = false
+        var selectedAgentID: String?
 
         func includes(_ session: OpenClawChatSessionEntry) -> Bool {
             // Port src/shared/session-list-visibility.ts: cron keys own automation,
@@ -53,7 +54,10 @@ extension ChatSessionSidebarModel {
             }
         }
 
-        func sortedByCreation(_ sessions: [OpenClawChatSessionEntry]) -> [OpenClawChatSessionEntry] {
+        func sortedByCreation(
+            _ sessions: [OpenClawChatSessionEntry],
+            identity: (OpenClawChatSessionEntry) -> String = { $0.key }) -> [OpenClawChatSessionEntry]
+        {
             /// ui/src/components/app-sidebar-session-navigation-logic.ts:
             /// valid creation dates first, descending; then first observation and key.
             func date(_ session: OpenClawChatSessionEntry) -> Double? {
@@ -67,8 +71,8 @@ extension ChatSessionSidebarModel {
                     guard let right else { return true }
                     return left > right
                 }
-                let leftIndex = self.indices[lhs.key] ?? Int.max
-                let rightIndex = self.indices[rhs.key] ?? Int.max
+                let leftIndex = self.indices[identity(lhs)] ?? Int.max
+                let rightIndex = self.indices[identity(rhs)] ?? Int.max
                 return leftIndex == rightIndex ? lhs.key < rhs.key : leftIndex < rightIndex
             }
         }
