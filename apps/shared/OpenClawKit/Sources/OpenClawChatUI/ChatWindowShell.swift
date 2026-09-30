@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 public final class OpenClawChatWindowCommands {
+    public var sessionMenuConnection: (() async throws -> OpenClawSessionMenuConnection)?
     public var isCommandPalettePresented = false
     var composerFocusRequest = 0
     var findRequest = 0
@@ -99,6 +100,7 @@ public struct OpenClawChatWindowShell: View {
                 groups: self.$sessionGroups,
                 previews: self.sessionPreviews,
                 additionalAttentionRequests: self.attentionRequests)
+                .environment(\.openClawChatWindowCommands, self.windowCommands)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
         } detail: {
             ZStack {

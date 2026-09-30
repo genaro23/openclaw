@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import OpenClaw
 
@@ -37,5 +38,20 @@ struct WebChatManagerTests {
         expectedPath: String)
     {
         #expect(WebChatRoute.dashboardPath(sessionKey: sessionKey, agentID: agentID) == expectedPath)
+    }
+}
+
+extension WebChatManagerTests {
+    @Test(arguments: [false, true])
+    func `copied links preserve Gateway mounts and exact session keys without credentials`(preview: Bool) throws {
+        let base = try #require(URL(string: "wss://user:password@example.test/control/?token=private#fragment"))
+        let url = try #require(WebChatManager.sessionLink(
+            base: base,
+            sessionKey: "agent:bulk:release/#?",
+            agentID: "main",
+            preview: preview))
+        #expect(url
+            .absoluteString == "https://example.test/control" + (preview ? "/share" : "") +
+            "/chat/bulk/~key/release%2F%23%3F")
     }
 }

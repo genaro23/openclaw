@@ -1244,6 +1244,11 @@ final class WebChatSwiftUIWindowController: NSObject, NSWindowDelegate {
         }
         // Full window: native split-view shell with sessions sidebar and
         // toolbar pickers bridged into the NSToolbar.
+        self.windowCommands.sessionMenuConnection = gatewayTransport.flatMap { transport in
+            gatewayTarget.map { target in { try await Self.sessionMenuConnection(
+                transport.connection,
+                target: target) } }
+        }
         let hosting = NSHostingController(rootView: MacChatSurface(
             viewModel: vm,
             windowCommands: self.windowCommands,
@@ -1271,6 +1276,45 @@ final class WebChatSwiftUIWindowController: NSObject, NSWindowDelegate {
             self?.onSessionTargetChanged?(vm.currentSessionTarget)
         }
         self.sidebarPresence?.start()
+    }
+
+    private static func sessionMenuConnection(
+        _ connection: GatewayConnection, target: DashboardGatewayTarget) async throws -> OpenClawSessionMenuConnection
+    {
+        _ = try await connection.acquireServerLease()
+        for await delivery in await connection.subscribe() {
+            guard !Task.isCancelled else { throw CancellationError() }
+            guard delivery.isCurrent, case let .snapshot(hello) = delivery.push else { continue }
+            let lease = delivery.serverLease
+            let gatewayURL = await connection.configuredGatewayURL()
+            let base = hello.controluiurl.flatMap(URL.init(string:)) ?? gatewayURL
+            return OpenClawSessionMenuConnection(
+                hello: hello,
+                local: target == .local || (target == .primary && AppStateStore.shared.connectionMode == .local),
+                selfProfileID: hello.snapshot.presence.first {
+                    $0.instanceid == InstanceIdentity.instanceId && $0.reason != "disconnect"
+                }?.user?["id"]?.value as? String,
+                isCurrent: { connection.serverLeaseMatchesCurrentState(lease) },
+                request: { try await connection.request($0, ifCurrentServerLease: lease) },
+                link: { session, preview in
+                    base.flatMap { WebChatManager.sessionLink(
+                        base: $0,
+                        sessionKey: session.key,
+                        agentID: session.agentId,
+                        preview: preview) }
+                },
+                openWindow: { session in
+                    guard connection.serverLeaseMatchesCurrentState(lease) else { return }
+                    WebChatManager.shared.openGatewayWindow(
+                        for: target,
+                        newWindow: true,
+                        route: WebChatRoute(
+                            sessionKey: session.key,
+                            agentID: session.agentId),
+                        sourceIsCurrent: { connection.serverLeaseMatchesCurrentState(lease) })
+                })
+        }
+        throw CancellationError()
     }
 
     var acceptsNativeDraft: Bool {

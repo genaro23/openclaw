@@ -18,6 +18,9 @@ struct ChatSessionSidebar: View {
     @Binding var groups: [OpenClawChatSessionGroup]
     let previews: ChatSessionSidebarPreviews
     var additionalAttentionRequests: [OpenClawChatAttentionRequest] = []
+    @Environment(\.openClawChatWindowCommands) var menuCommands
+    @State var groupMenuConnection: OpenClawSessionMenuConnection?
+    @State var menuPresentation: ChatSessionIconPicker?
     @State var presentedAttention: OpenClawChatAttentionPresentation?
     @State var sessionPendingDeletion: OpenClawChatSessionEntry?
     @State var sessionPendingRename: OpenClawChatSessionEntry?
@@ -90,6 +93,7 @@ struct ChatSessionSidebar: View {
                             Spacer(minLength: 0)
                             self.attentionBadge(summary: attention, targetID: section.id)
                         }
+                        .contextMenu { self.groupMenu(title) }
                         .modifier(ChatSidebarAttentionAccessibility(
                             title: title,
                             targetID: section.id,
@@ -155,6 +159,7 @@ struct ChatSessionSidebar: View {
                 self.viewModel.refreshSessions(limit: 200)
             }
         }
+        .sheet(item: self.$menuPresentation) { $0 }
         .sheet(item: self.$inspectedSession) { session in
             ChatSessionInspectorSheet(viewModel: self.viewModel, session: session)
         }
