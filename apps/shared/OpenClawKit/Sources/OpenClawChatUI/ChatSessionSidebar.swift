@@ -35,6 +35,7 @@ struct ChatSessionSidebar: View {
     @AppStorage("openclaw.chat.sidebar.showAutomationSessions") var showAutomationSessions = false
     @AppStorage("openclaw.chat.sidebar.showSystemSessions") var showSystemSessions = false
     @State private var observedOrder = ChatSessionSidebarModel.ObservedOrder()
+    @State var catalogData = ChatSessionSidebarCatalogs()
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -116,6 +117,7 @@ struct ChatSessionSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .modifier(ChatSidebarCatalogLifecycle(data: self.catalogData, viewModel: self.viewModel))
         .listItemTint(.monochrome)
         .searchable(
             text: self.$query,

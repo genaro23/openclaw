@@ -8,7 +8,8 @@ extension ChatSessionSidebar {
 
     func rosterSections(observedOrder: ChatSessionSidebarModel.ObservedOrder) -> [ChatSessionSidebarModel.Section] {
         let data = self.rosterData
-        let rows = data?.rows ?? self.viewModel.sessions
+        let adopted = self.catalogData.adoptedKeys(archived: data?.query.status == .archived)
+        let rows = (data?.rows ?? self.viewModel.sessions).filter { !adopted.contains($0.key) }
         return ChatSessionSidebarModel.sections(
             sessions: rows,
             currentSessionKey: self.viewModel.sessionKey,
