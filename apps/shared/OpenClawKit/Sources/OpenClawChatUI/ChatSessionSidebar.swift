@@ -2,10 +2,6 @@
 import SwiftUI
 
 extension ChatSessionSidebarModel.Node {
-    fileprivate var outlineChildren: [Self]? {
-        self.children.isEmpty ? nil : self.children
-    }
-
     var previewSessions: [OpenClawChatSessionEntry] {
         [self.session] + self.children.flatMap(\.previewSessions)
     }
@@ -34,7 +30,8 @@ struct ChatSessionSidebar: View {
     @AppStorage("openclaw.chat.sidebar.showMessagePreview") var showMessagePreview = false
     @AppStorage("openclaw.chat.sidebar.showAutomationSessions") var showAutomationSessions = false
     @AppStorage("openclaw.chat.sidebar.showSystemSessions") var showSystemSessions = false
-    @State private var observedOrder = ChatSessionSidebarModel.ObservedOrder()
+    @State var observedOrder = ChatSessionSidebarModel.ObservedOrder()
+    @State var batch = ChatSessionSidebarBatch()
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -47,7 +44,7 @@ struct ChatSessionSidebar: View {
         let previewRequest = ChatSessionSidebarPreviews.Request(
             viewModel: self.viewModel,
             sessions: sections.flatMap(\.nodes).flatMap(\.previewSessions))
-        return List(selection: self.selectionBinding) {
+        return List(selection: self.batchSelectionBinding) {
             self.newThreadButton
                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 16, trailing: 0))
                 .listRowBackground(Color.clear)
@@ -121,7 +118,14 @@ struct ChatSessionSidebar: View {
             text: self.$query,
             placement: .sidebar,
             prompt: String(localized: "Search threads"))
-        .safeAreaInset(edge: .bottom, spacing: 0) { self.connectionFooter }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) { self.batchBar
+                self.connectionFooter
+            }
+        }
+        .onChange(of: self.viewModel.sidebarData?.scopeRevision) { _, _ in self.batch.reset() }
+        .onChange(of: self.rosterData?.query) { _, _ in self.batch.reset(clearConnection: false) }
+        .onChange(of: self.viewModel.sessionKey) { _, _ in self.batch.selection = .init() }
         .onChange(of: (self.rosterData?.rows ?? self.viewModel.sessions).map(\.key), initial: true) { _, keys in
             self.observedOrder.observe(keys)
         }
@@ -144,11 +148,11 @@ struct ChatSessionSidebar: View {
         .task(id: self.groupRefreshID) {
             self.viewModel.refreshSessions(limit: 200)
             do {
-                let groups = try await self.viewModel.fetchSessionGroups()
+                let groups = try await self.loadInteractionGroups()
                 self.groups = groups
                 self.groupLoadFailed = false
             } catch {
-                self.groupLoadFailed = true
+                if !Task.isCancelled { self.groupLoadFailed = true }
             }
         }
         .onChange(of: self.viewModel.healthOK) { previous, current in
@@ -157,57 +161,47 @@ struct ChatSessionSidebar: View {
             }
         }
         .sheet(item: self.$menuPresentation) { $0 }
-        .sheet(item: self.$inspectedSession) { session in
-            ChatSessionInspectorSheet(viewModel: self.viewModel, session: session)
-        }
-        .alert(
-            String(localized: "Rename Thread"),
-            isPresented: self.isPresentingRenameAlert)
+        .confirmationDialog(
+            String(format: String(localized: "Delete %lld threads?"), self.batch.pendingDelete.count),
+            isPresented: Binding(
+                get: { !self.batch.pendingDelete.isEmpty },
+                set: { if !$0 { self.batch.pendingDelete = [] } }))
         {
-            TextField(String(localized: "Thread name"), text: self.$renameText)
-            Button(String(localized: "Rename")) {
-                if let session = self.sessionPendingRename {
-                    self.viewModel.renameSession(key: session.key, label: self.renameText, agentID: session.agentId)
-                }
-                self.sessionPendingRename = nil
+            Button(String(localized: "Delete"), role: .destructive) {
+                self.runSidebarBatch(.delete, rows: self.batch.pendingDelete)
             }
-            Button(String(localized: "Cancel"), role: .cancel) {
-                self.sessionPendingRename = nil
-            }
+        } message: {
+            Text("The threads and their transcripts are removed from the gateway.")
         }
-        .confirmationDialog(self.deleteDialogTitle, isPresented: self.isPresentingDeleteDialog) {
-                Button(String(localized: "Delete Thread"), role: .destructive) {
-                    if let session = self.sessionPendingDeletion {
-                        self.viewModel.deleteSession(session.key, agentID: session.agentId)
-                    }
-                    self.sessionPendingDeletion = nil
-                }
-            } message: {
-                Text(String(localized: "The thread and its transcript are removed from the gateway."))
-                    .font(OpenClawChatTypography.body(size: 13, weight: .regular, relativeTo: .body))
+        .sheet(item: self.$inspectedSession) { session in
+                ChatSessionInspectorSheet(viewModel: self.viewModel, session: session)
             }
-    }
-
-    private var selectionBinding: Binding<String?> {
-        Binding(
-            get: {
-                ChatSessionSidebarModel.selectedSessionKey(
-                    sessions: self.viewModel.sessions,
-                    currentSessionKey: self.viewModel.sessionKey,
-                    mainSessionKey: self.viewModel.selectedAgentMainSessionKey,
-                    activeAgentID: self.viewModel.selectedAgentID,
-                    sessionRoutingContract: self.viewModel.agentCatalog?.sessionRoutingContract ??
-                        self.viewModel.sessionRoutingContract)
-            },
-            set: { next in
-                guard let next, next != self.viewModel.sessionKey else { return }
-                let agentID = self.viewModel.sessions.first(where: { $0.key == next })?.agentId
-                // List writes this binding inside its table selection delegate.
-                // Navigation changes the same rows and focus, so leave that callback first.
-                Task { @MainActor in
-                    self.viewModel.switchSession(to: next, agentID: agentID)
+            .alert(
+                String(localized: "Rename Thread"),
+                isPresented: self.isPresentingRenameAlert)
+            {
+                TextField(String(localized: "Thread name"), text: self.$renameText)
+                Button(String(localized: "Rename")) {
+                    if let session = self.sessionPendingRename {
+                        self.viewModel.renameSession(key: session.key, label: self.renameText, agentID: session.agentId)
+                    }
+                    self.sessionPendingRename = nil
                 }
-            })
+                Button(String(localized: "Cancel"), role: .cancel) {
+                    self.sessionPendingRename = nil
+                }
+            }
+            .confirmationDialog(self.deleteDialogTitle, isPresented: self.isPresentingDeleteDialog) {
+                    Button(String(localized: "Delete Thread"), role: .destructive) {
+                        if let session = self.sessionPendingDeletion {
+                            self.viewModel.deleteSession(session.key, agentID: session.agentId)
+                        }
+                        self.sessionPendingDeletion = nil
+                    }
+                } message: {
+                    Text(String(localized: "The thread and its transcript are removed from the gateway."))
+                        .font(OpenClawChatTypography.body(size: 13, weight: .regular, relativeTo: .body))
+                }
     }
 
     private func agentsSection(now: Date) -> some View {
@@ -253,7 +247,7 @@ struct ChatSessionSidebar: View {
     private var groupRefreshID: String {
         let categories = self.viewModel.sessions.compactMap(\.category).sorted().joined(separator: "|")
         let revision = self.viewModel.sessionGroupsRevision
-        return "\(self.viewModel.healthOK)|\(categories)|\(revision)|\(self.groupRefreshNonce)"
+        return "\(self.viewModel.healthOK)|\(categories)|\(revision)|\(self.groupRefreshNonce)|\(self.viewModel.sidebarData?.scopeRevision ?? 0)"
     }
 
     private func rows(
@@ -261,17 +255,18 @@ struct ChatSessionSidebar: View {
         now: Date,
         previewRequest: ChatSessionSidebarPreviews.Request) -> some View
     {
-        let rootIDs = Set(nodes.map(\.id))
-        return OutlineGroup(nodes, children: \.outlineChildren) { node in
+        let items = nodes.map { ChatSidebarSelection.Node($0, identity: self.interactionIdentity) }
+        let rootIDs = Set(items.map(\.id))
+        return OutlineGroup(items, children: \.children) { item in
             self.row(
-                for: node,
-                isChild: !rootIDs.contains(node.id),
+                for: item.row,
+                isChild: !rootIDs.contains(item.id),
                 now: now,
                 previewRequest: previewRequest)
         }
     }
 
-    private func isGroupCollapsed(_ name: String) -> Bool {
+    func isGroupCollapsed(_ name: String) -> Bool {
         self.collapsedSessionGroups.split(separator: "\u{1F}").contains(Substring(name))
     }
 

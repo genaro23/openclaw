@@ -19,7 +19,7 @@ extension ChatSessionSidebar {
             isConnected: self.viewModel.healthOK,
             preview: self.rowPreview(for: session, previewRequest: previewRequest),
             now: now)
-        return ChatSidebarRow(
+        let content = ChatSidebarRow(
             node: node,
             isChild: isChild,
             facts: facts,
@@ -34,13 +34,21 @@ extension ChatSessionSidebar {
             },
             archive: { self.viewModel.setSessionArchived(session, archived: !session.isArchived) },
             presentedAttention: self.$presentedAttention)
+        return self.interactionRow(content, session: session)
             .overlay(alignment: .leading) {
                 OpenClawSessionColorStripe(color: session.color)
                     .offset(x: -6)
             }
-            // The tag type must equal the List selection type (String?) exactly.
-            .tag(Optional(session.key))
-            .contextMenu { self.contextMenu(for: session, isChild: isChild) }
+            .tag(self.interactionIdentity(session))
+            .contextMenu {
+                if self.selectedBatchRows.count > 1,
+                   self.batch.selection.keys.contains(self.interactionIdentity(session))
+                {
+                    self.batchMenu.disabled(self.batch.running)
+                } else {
+                    self.contextMenu(for: session, isChild: isChild)
+                }
+            }
             .modifier(ChatSidebarAttentionAccessibility(
                 title: ChatSessionSidebarModel.sidebarDisplayName(for: session),
                 targetID: targetID,
