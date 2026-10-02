@@ -205,7 +205,6 @@ export async function stopCrabboxLease(params: {
     params.provider === "azure" &&
     result.termination === "exit" &&
     result.code === 4 &&
-    output.includes(params.id) &&
     output.includes("Azure fixed lease cannot be adopted without its create intent")
   ) {
     result = await runCrabboxCommand({

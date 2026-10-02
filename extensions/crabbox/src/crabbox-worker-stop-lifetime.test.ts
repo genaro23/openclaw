@@ -35,7 +35,7 @@ describe("Crabbox stop lifetime", () => {
       .mockResolvedValueOnce(
         commandResult({
           code: 4,
-          stderr: `${LEASE_ID}: Azure fixed lease cannot be adopted without its create intent`,
+          stderr: "Azure fixed lease cannot be adopted without its create intent",
         }),
       )
       .mockResolvedValueOnce(commandResult());
