@@ -6,6 +6,7 @@ import {
   recheckGatewayRunBootstrap,
 } from "../cli/gateway-cli/pre-bootstrap.js";
 import * as healthState from "../config/io.health-state.js";
+import * as configMutation from "../config/mutate.js";
 import * as checkpoint from "../infra/startup-migration-checkpoint.js";
 import { ExitError } from "../runtime.js";
 import {
@@ -15,13 +16,79 @@ import {
 import { withEnvAsync } from "../test-utils/env.js";
 import { runDoctorConfigPreflight } from "./doctor-config-preflight.js";
 import { withDoctorConfigPreflightHome } from "./doctor-config-preflight.test-support.js";
-import { runStartupConfigPreflight } from "./startup-config-preflight.js";
+import {
+  runStartupConfigPreflight,
+  type StartupConfigPreflightOptions,
+} from "./startup-config-preflight.js";
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   closeOpenClawStateDatabaseForTest();
 });
+
+it.each(["current", "backup", "concurrent-edit"] as const)(
+  "admits only the owned startup config write from %s",
+  async (source) => {
+    await withDoctorConfigPreflightHome(async (home) => {
+      const stateDir = path.join(home, ".openclaw");
+      const configPath = path.join(stateDir, "openclaw.json");
+      const original = JSON.stringify({
+        gateway: { mode: "local" },
+        plugins: { enabled: false },
+      });
+      await fs.mkdir(stateDir, { recursive: true });
+      openOpenClawStateDatabase({ path: path.join(stateDir, "state", "openclaw.sqlite") });
+      closeOpenClawStateDatabaseForTest();
+      await fs.writeFile(configPath, original);
+      if (source === "backup") {
+        await fs.writeFile(`${configPath}.bak`, original);
+        await fs.writeFile(configPath, '{"update":{"channel":"stable"}}');
+      }
+      const runtime = {
+        log() {},
+        error() {},
+        exit(code: number): never {
+          throw new ExitError(code);
+        },
+      };
+      expect(await prepareGatewayRunBootstrap({ opts: {}, runtime })).toBe(true);
+      const replacement = JSON.stringify({
+        gateway: { mode: "local", port: 19002 },
+        plugins: { enabled: false },
+      });
+      if (source === "concurrent-edit") {
+        const transform = configMutation.transformConfigFile;
+        vi.spyOn(configMutation, "transformConfigFile").mockImplementationOnce(async (params) => {
+          const committed = await transform(params);
+          await fs.writeFile(configPath, replacement);
+          return committed;
+        });
+      }
+      const options: StartupConfigPreflightOptions = {
+        gateway: true,
+        beforeStatePreparation: (snapshot, committedWrite) =>
+          recheckGatewayRunBootstrap({ opts: {}, runtime, snapshot, committedWrite }),
+      };
+      if (source === "concurrent-edit") {
+        await expect(runStartupConfigPreflight(options)).rejects.toMatchObject({ code: 1 });
+        expect(await fs.readFile(configPath, "utf8")).toBe(replacement);
+      } else {
+        const ready = await runStartupConfigPreflight(options);
+        expect(ready.snapshot.valid).toBe(true);
+        expect(ready.snapshot.sourceConfig.meta?.migrations?.webhookListeners).toBe(true);
+        expect(await fs.readFile(`${configPath}.bak`, "utf8")).toBe(original);
+        const committed = await fs.readFile(configPath, "utf8");
+        expect((await runStartupConfigPreflight(options)).snapshot.valid).toBe(true);
+        expect(await fs.readFile(configPath, "utf8")).toBe(committed);
+        await fs.writeFile(configPath, replacement);
+        await expect(runStartupConfigPreflight(options)).rejects.toMatchObject({ code: 1 });
+        expect(await fs.readFile(configPath, "utf8")).toBe(replacement);
+      }
+      expect(checkpoint.hasActiveStartupMigrationLease()).toBe(false);
+    });
+  },
+);
 
 it.each([
   ["localhost", "loopback"],

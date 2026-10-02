@@ -1,6 +1,6 @@
 // Global Commander pre-action hook: startup presentation, config guard, logging, and plugin preflight.
 import type { Command } from "commander";
-import type { ConfigFileSnapshot } from "../../config/types.js";
+import type { StartupConfigPreflightOptions } from "../../commands/startup-config-preflight.js";
 import { setVerbose } from "../../globals.js";
 import type { LogLevel } from "../../logging/levels.js";
 import { resolvePluginInstallInvalidConfigPolicy } from "../../plugins/install-config.js";
@@ -200,7 +200,7 @@ export function registerPreActionHooks(program: Command, programVersion: string)
       });
       return;
     }
-    let beforeStatePreparation: ((snapshot?: ConfigFileSnapshot) => Promise<boolean>) | undefined;
+    let beforeStatePreparation: StartupConfigPreflightOptions["beforeStatePreparation"];
     let allowInvalid = shouldAllowInvalidConfigForAction(actionCommand, commandPath);
     if (isGatewayRunAction(actionCommand)) {
       const { prepareGatewayRunBootstrap, recheckGatewayRunBootstrap } =
@@ -213,17 +213,18 @@ export function registerPreActionHooks(program: Command, programVersion: string)
       if (!shouldBootstrap) {
         return;
       }
-      beforeStatePreparation = (snapshot) =>
+      beforeStatePreparation = (snapshot, committedWrite) =>
         recheckGatewayRunBootstrap({
           opts,
           runtime: defaultRuntime,
+          committedWrite,
           ...(snapshot ? { snapshot } : {}),
         });
     }
     const commandAgentId = getCommandAgentId(actionCommand);
     if (commandAgentId) {
       const existingGuard = beforeStatePreparation;
-      beforeStatePreparation = async (snapshot) => {
+      beforeStatePreparation = async (snapshot, committedWrite) => {
         if (snapshot) {
           const { isValidAgentId, normalizeAgentId } =
             await import("@openclaw/normalization-core/agent-id");
@@ -238,7 +239,7 @@ export function registerPreActionHooks(program: Command, programVersion: string)
             }
           }
         }
-        return (await existingGuard?.(snapshot)) ?? true;
+        return (await existingGuard?.(snapshot, committedWrite)) ?? true;
       };
     }
     await ensureCliExecutionBootstrap({
