@@ -1,6 +1,7 @@
 import { asNullableRecord as asObjectRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeChannelConfigEntries } from "../config/channel-config-normalization.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { PluginDoctorHistoricalWebhookListener } from "../plugins/doctor-contract-module.js";
 import type {
   ChannelDoctorConfigMutation,
   ChannelDoctorLegacyConfigRule,
@@ -16,12 +17,7 @@ export function createLegacyWebhookListenerDoctorContract(params: {
   defaultHost?: string;
   preserveAuthoredActivation?: true;
 }): {
-  historicalWebhookListener: {
-    channelId: string;
-    port: number;
-    host?: string;
-    preserveAuthoredActivation?: true;
-  };
+  historicalWebhookListener: PluginDoctorHistoricalWebhookListener;
   legacyConfigRules: ChannelDoctorLegacyConfigRule[];
   normalizeCompatibilityConfig: (params: { cfg: OpenClawConfig }) => ChannelDoctorConfigMutation;
 } {

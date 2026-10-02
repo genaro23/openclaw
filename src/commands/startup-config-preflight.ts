@@ -100,8 +100,6 @@ async function prepareStartupConfig(
   ) {
     const { applyPluginDoctorCompatibilityMigrations } =
       await import("../plugins/doctor-contract-registry.js");
-    const { findRetiredConfigUpgradeRequirement } =
-      await import("./doctor/shared/retired-config-formats.js");
     const migrate = (config: OpenClawConfig) => {
       const migration = applyPluginDoctorCompatibilityMigrations(config, {
         config,
@@ -126,15 +124,7 @@ async function prepareStartupConfig(
           baseHash: read.snapshot.hash ?? undefined,
           writeOptions: { auditOrigin: "doctor" },
           afterWrite: { mode: "none", reason: "startup config migration" },
-          transform: (config, { snapshot }) => {
-            const retired = findRetiredConfigUpgradeRequirement(
-              snapshot.sourceConfigBeforeMigrations ?? snapshot.sourceConfig,
-            );
-            if (retired) {
-              throw new Error(`${retired.message} ${retired.nextAction}`);
-            }
-            return { nextConfig: migrate(config).config };
-          },
+          transform: (config) => ({ nextConfig: migrate(config).config }),
         });
         read = await readAdmitted();
       }

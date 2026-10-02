@@ -7,6 +7,7 @@ import { createConfigIO } from "../config/io.factory.js";
 import { replaceConfigFile } from "../config/mutate.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { recordGatewayBootStart } from "../infra/gateway-boot-lifecycle.js";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { applyPluginDoctorCompatibilityMigrations } from "./doctor-contract-registry.js";
 import { clearPluginDoctorContractRegistryCache } from "./doctor-contract-registry.test-fixtures.js";
@@ -150,15 +151,22 @@ describe("Doctor historical webhook pins", () => {
     },
   );
 
-  it("completes a fresh install without pins even after its first Gateway boot", async () => {
-    const { env, migrate } = await fixture();
-    const config = channelConfig({ work: { enabled: true } });
-    const fresh = migrate(config);
-    expect(fresh.config.channels).toEqual(config.channels);
-    expect(fresh.config.meta?.migrations?.webhookListeners).toBe(true);
-    expect(recordGatewayBootStart(env, 1_800_000_000_000)).toBeDefined();
-    expect(migrate(fresh.config)).toEqual({ config: fresh.config, changes: [] });
-  });
+  it.each(["no database", "empty database"])(
+    "completes a fresh install with %s without pins even after its first Gateway boot",
+    async (state) => {
+      const { env, migrate } = await fixture();
+      if (state === "empty database") {
+        openOpenClawStateDatabase({ env });
+        await closeStateDatabaseForTest();
+      }
+      const config = channelConfig({ work: { enabled: true } });
+      const fresh = migrate(config);
+      expect(fresh.config.channels).toEqual(config.channels);
+      expect(fresh.config.meta?.migrations?.webhookListeners).toBe(true);
+      expect(recordGatewayBootStart(env, 1_800_000_000_000)).toBeDefined();
+      expect(migrate(fresh.config)).toEqual({ config: fresh.config, changes: [] });
+    },
+  );
 
   it("keeps read-only completion when a managed config symlink selects a new generation", async () => {
     const { configPath, env, migrate } = await fixture();

@@ -19,6 +19,7 @@ import { normalizeOptionalAccountId } from "../../../routing/account-id.js";
 import { writeConfigMachineState } from "../../../state/config-machine-state-write.js";
 import { readConfigMachineState } from "../../../state/config-machine-state.js";
 import { withExistingOpenClawStateDatabaseReadOnly } from "../../../state/openclaw-state-db-readonly.js";
+import { tableExists } from "../../../state/openclaw-state-db-schema-helpers.js";
 import type { DB } from "../../../state/openclaw-state-db.generated.js";
 
 export const HISTORICAL_WEBHOOK_CHANNELS = ["telegram", "feishu", "msteams", "nextcloud-talk"];
@@ -93,8 +94,10 @@ export function applyHistoricalWebhookPins(
         return [
           query.selectFrom("gateway_boot_lifecycle").select("boot_id as evidence").limit(1),
           query.selectFrom("channel_ingress_events").select("event_id as evidence").limit(1),
-          query.selectFrom("update_runs").select("run_id as evidence").limit(1),
-        ].some((statement) => executeSqliteQueryTakeFirstSync(db, statement));
+          // The update ledger exists only after its first write.
+          tableExists(db, "update_runs") &&
+            query.selectFrom("update_runs").select("run_id as evidence").limit(1),
+        ].some((statement) => statement && executeSqliteQueryTakeFirstSync(db, statement));
       },
       { env },
     );

@@ -23,34 +23,6 @@ afterEach(() => {
   closeOpenClawStateDatabaseForTest();
 });
 
-it("preserves retired authored plugin receipts before webhook startup writes", async () => {
-  await withDoctorConfigPreflightHome(async (home) => {
-    await withEnvAsync(
-      { OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1", OPENCLAW_CONFIG_READONLY: undefined },
-      async () => {
-        const configPath = path.join(home, ".openclaw", "openclaw.json");
-        const original = JSON.stringify({
-          gateway: { mode: "local" },
-          plugins: {
-            enabled: false,
-            installs: { fixture: { source: "npm", spec: "fixture@1.0.0" } },
-          },
-        });
-        const backup = '{"gateway":{"mode":"local"}}\n';
-        await fs.mkdir(path.dirname(configPath), { recursive: true });
-        await fs.writeFile(configPath, original);
-        await fs.writeFile(`${configPath}.bak`, backup);
-
-        await expect(runStartupConfigPreflight({ gateway: true, observe: false })).rejects.toThrow(
-          /plugins\.installs.*Install OpenClaw 2026\.9\.5/s,
-        );
-        expect(await fs.readFile(configPath, "utf8")).toBe(original);
-        expect(await fs.readFile(`${configPath}.bak`, "utf8")).toBe(backup);
-      },
-    );
-  });
-});
-
 it.each([
   ["localhost", "loopback"],
   ["0.0.0.0", "lan"],
@@ -98,7 +70,11 @@ it("skips recovery health reads without a backup and admits a later backup", asy
   await withDoctorConfigPreflightHome(async (home) => {
     const stateDir = path.join(home, ".openclaw");
     const configPath = path.join(stateDir, "openclaw.json");
-    const raw = JSON.stringify({ gateway: { mode: "local" }, plugins: { enabled: false } });
+    const raw = JSON.stringify({
+      gateway: { mode: "local" },
+      plugins: { enabled: false },
+      meta: { migrations: { webhookListeners: true } },
+    });
     await fs.mkdir(stateDir, { recursive: true });
     await fs.writeFile(configPath, raw);
     openOpenClawStateDatabase({ path: path.join(stateDir, "state", "openclaw.sqlite") });
@@ -146,7 +122,11 @@ it("restores the admitted backup after database readiness exceeds the lease TTL"
     const stateDir = path.join(home, ".openclaw");
     const configPath = path.join(stateDir, "openclaw.json");
     await fs.mkdir(stateDir, { recursive: true });
-    const backup = { gateway: { mode: "local" }, plugins: { enabled: false } };
+    const backup = {
+      gateway: { mode: "local" },
+      plugins: { enabled: false },
+      meta: { migrations: { webhookListeners: true } },
+    };
     await fs.writeFile(configPath, '{"update":{"channel":"stable"}}\n');
     await fs.writeFile(`${configPath}.bak`, JSON.stringify(backup));
     openOpenClawStateDatabase({ path: path.join(stateDir, "state", "openclaw.sqlite") });
@@ -202,7 +182,11 @@ it.each(["backup", "active config"] as const)(
       const stateDir = path.join(home, ".openclaw");
       const configPath = path.join(stateDir, "openclaw.json");
       await fs.mkdir(stateDir, { recursive: true });
-      const backup = { gateway: { mode: "local" }, plugins: { enabled: false } };
+      const backup = {
+        gateway: { mode: "local" },
+        plugins: { enabled: false },
+        meta: { migrations: { webhookListeners: true } },
+      };
       const original =
         kind === "backup" ? '{"update":{"channel":"stable"}}\n' : JSON.stringify(backup);
       const replacement = JSON.stringify(
@@ -274,7 +258,11 @@ it.each(["expired", "reassigned"] as const)(
       await fs.writeFile(configPath, original);
       await fs.writeFile(
         `${configPath}.bak`,
-        JSON.stringify({ gateway: { mode: "local" }, plugins: { enabled: false } }),
+        JSON.stringify({
+          gateway: { mode: "local" },
+          plugins: { enabled: false },
+          meta: { migrations: { webhookListeners: true } },
+        }),
       );
       openOpenClawStateDatabase({ path: path.join(stateDir, "state", "openclaw.sqlite") });
       closeOpenClawStateDatabaseForTest();

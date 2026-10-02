@@ -737,7 +737,8 @@ export function applyPluginDoctorCompatibilityMigrations(
         entry.rules.length > 0 || Boolean(entry.normalizeCompatibilityConfig),
       );
       return {
-        ...entry,
+        pluginId: entry.pluginId,
+        normalizeCompatibilityConfig: entry.normalizeCompatibilityConfig,
         transform: params?.historicalWebhookListeners
           ? (mutation: ReturnType<PluginDoctorCompatibilityNormalizer>) =>
               applyHistoricalWebhookPins(mutation, entry.historicalWebhookListener, {
