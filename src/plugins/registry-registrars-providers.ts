@@ -1,6 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { AgentHarness, AgentHarnessRegistrationOptions } from "../agents/harness/types.js";
-import type { StorageProvider } from "../storage/types.js";
 import { getCoreEmbeddingProvider } from "./core-embedding-providers.js";
 import type { EmbeddingProviderAdapter } from "./embedding-providers.js";
 import { invalidateProviderRegistryIndex } from "./provider-registry-index.js";
@@ -13,7 +12,7 @@ import type {
   PluginTextTransformsRegistration,
 } from "./registry-types.js";
 import { validateStorageProviderContract } from "./storage-provider-registry.js";
-import type { CliBackendPlugin, ProviderPlugin, WorkerProvider } from "./types.js";
+import type { CliBackendPlugin, ProviderPlugin } from "./types.js";
 import { validateWorkerProviderContract } from "./worker-provider-registry.js";
 
 export function createProviderRegistrars(state: PluginRegistryState) {
@@ -232,52 +231,33 @@ export function createProviderRegistrars(state: PluginRegistryState) {
       return true;
     };
 
-  const registerWorkerProvider = (record: PluginRecord, provider: WorkerProvider) => {
-    const validation = validateWorkerProviderContract(
-      provider,
-      record.contracts?.workerProviders ?? [],
-    );
-    if (!validation.ok) {
-      reportRegistrationError(record, validation.message);
-      return;
-    }
-    const { id } = validation;
-    const existing = registry.workerProviders.get(id);
-    if (existing) {
-      reportRegistrationError(
-        record,
-        `worker provider already registered: ${id} (${existing.pluginId})`,
-      );
-      return;
-    }
-    registry.workerProviders.set(
-      id,
-      createRegistration(record, {
-        provider,
-      }),
-    );
-  };
-
-  const registerStorageProvider = (record: PluginRecord, provider: StorageProvider) => {
-    const validation = validateStorageProviderContract(
-      provider,
-      record.contracts?.storageProviders ?? [],
-    );
-    if (!validation.ok) {
-      reportRegistrationError(record, validation.message);
-      return;
-    }
-    const { id } = validation;
-    const existing = registry.storageProviders.get(id);
-    if (existing) {
-      reportRegistrationError(
-        record,
-        `storage provider already registered: ${id} (${existing.pluginId})`,
-      );
-      return;
-    }
-    registry.storageProviders.set(id, createRegistration(record, { provider }));
-  };
+  const createContractProviderRegistrar =
+    <T>(
+      kind: "worker" | "storage",
+      getRegistrations: () => Map<string, PluginOwnedProviderRegistration<T>>,
+      validate: (
+        provider: T,
+        declaredIds: readonly string[],
+      ) => ReturnType<typeof validateStorageProviderContract>,
+    ) =>
+    (record: PluginRecord, provider: T) => {
+      const validation = validate(provider, record.contracts?.[`${kind}Providers`] ?? []);
+      if (!validation.ok) {
+        reportRegistrationError(record, validation.message);
+        return;
+      }
+      const { id } = validation;
+      const registrations = getRegistrations();
+      const existing = registrations.get(id);
+      if (existing) {
+        reportRegistrationError(
+          record,
+          `${kind} provider already registered: ${id} (${existing.pluginId})`,
+        );
+        return;
+      }
+      registrations.set(id, createRegistration(record, { provider }));
+    };
 
   return {
     registerProvider,
@@ -285,8 +265,16 @@ export function createProviderRegistrars(state: PluginRegistryState) {
     registerCliBackend,
     registerTextTransforms,
     registerEmbeddingProvider,
-    registerWorkerProvider,
-    registerStorageProvider,
+    registerWorkerProvider: createContractProviderRegistrar(
+      "worker",
+      () => registry.workerProviders,
+      validateWorkerProviderContract,
+    ),
+    registerStorageProvider: createContractProviderRegistrar(
+      "storage",
+      () => registry.storageProviders,
+      validateStorageProviderContract,
+    ),
     registerSpeechProvider: createProviderLikeRegistrar({
       kindLabel: "speech provider",
       registrations: registry.speechProviders,
