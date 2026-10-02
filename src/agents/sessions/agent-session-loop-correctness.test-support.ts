@@ -9,17 +9,18 @@ import type { AgentSessionConfig } from "./agent-session-types.js";
 import { AgentSession } from "./agent-session.js";
 import { AuthStorage } from "./auth-storage.js";
 import type { ToolDefinition } from "./extensions/types.js";
-import { ModelRegistry } from "./model-registry.js";
+import { ModelRegistry, type ProviderConfigInput } from "./model-registry.js";
 import type { ResourceLoader } from "./resource-loader.js";
 import { createAgentSession, createAgentSessionForEmbeddedRunner } from "./sdk.js";
 import { SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 
+type TestStreamSimple = NonNullable<ProviderConfigInput["streamSimple"]>;
 const hoistedStreamMocks = vi.hoisted(() => ({
-  streamSimple: vi.fn(),
+  streamSimple: vi.fn<TestStreamSimple>(),
 }));
 
-export const streamMocks: { streamSimple: Mock } = hoistedStreamMocks;
+export const streamMocks: { streamSimple: Mock<TestStreamSimple> } = hoistedStreamMocks;
 
 export const testModel: Model = {
   id: "test-model",
