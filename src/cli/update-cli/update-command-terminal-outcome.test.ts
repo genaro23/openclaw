@@ -86,6 +86,7 @@ let base: string;
 let temporary: string;
 let jsonOutput: unknown[];
 let humanOutput: string[];
+let errorOutput: string[];
 beforeEach(async () => {
   vi.mocked(verifyUpdatedGateway).mockReset();
   base = await fs.realpath(dirs.make("update-terminal-outcome-"));
@@ -97,6 +98,7 @@ beforeEach(async () => {
   vi.stubEnv("OPENCLAW_UPDATE_RUN_HANDOFF", "");
   jsonOutput = [];
   humanOutput = [];
+  errorOutput = [];
   vi.spyOn(defaultRuntime, "writeJson").mockImplementation((value) => {
     jsonOutput.push(structuredClone(value));
   });
@@ -105,6 +107,7 @@ beforeEach(async () => {
   });
   vi.spyOn(defaultRuntime, "error").mockImplementation((value) => {
     humanOutput.push(String(value));
+    errorOutput.push(String(value));
   });
 });
 afterEach(() => {
@@ -637,6 +640,7 @@ async function scenario(
     observationLeases,
     sentinel: preparedRecovery ? await readRestartSentinel(run.env) : undefined,
     humanOutput,
+    errorOutput,
     history,
     report,
     beforeRepeat,
@@ -666,6 +670,9 @@ describe("composed cleanup and terminal outcome", () => {
     expect(value.observedResults).toEqual([expect.objectContaining({ status: "ok" })]);
     expect(value.observationLeases).toEqual(["absent"]);
     expect(value.humanOutput.join("\n").toLowerCase()).toContain("updated");
+    expect(value.errorOutput).not.toContain(
+      "Finishing update: checking package backup retention and cleanup.",
+    );
     expect(value.afterRepeat).toEqual(value.beforeRepeat);
   });
   it.each(["release-failure", "revoked", "link-retained"] as const)(
