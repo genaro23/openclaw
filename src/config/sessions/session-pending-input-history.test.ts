@@ -137,7 +137,7 @@ it.each(["transaction", "commit"] as const)(
         transcriptInputId: receipt.inputId,
         sessionId: scope.sessionId,
         sessionKey: scope.sessionKey,
-        databasePath: database.path,
+        databasePath: identity.canonicalPath,
         idempotencyKey: "late:user",
         lifecycleGeneration: getAgentEventLifecycleGeneration(),
         messageJson: JSON.stringify(receipt.message),

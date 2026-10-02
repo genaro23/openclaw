@@ -404,6 +404,7 @@ export async function stageSessionPendingInput(
           return {
             agentId: current.agentId,
             path: current.path,
+            canonicalPath: physical.canonicalPath || current.path,
             databaseIdentity: physical.identity,
             databaseBirthtime: physical.birthtime,
           };
@@ -419,7 +420,7 @@ export async function stageSessionPendingInput(
         transcriptInputId: inputId,
         sessionId: scope.sessionId,
         sessionKey: resolved.sessionKey,
-        databasePath: source.path,
+        databasePath: source.canonicalPath,
         idempotencyKey,
         lifecycleGeneration,
         messageJson,
