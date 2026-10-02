@@ -17,6 +17,7 @@ import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.j
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../test-utils/env.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
 import { seedDeferredPluginSessionSource } from "./doctor-session-sqlite.deferred-plugin.test-support.js";
 import { runDoctorSessionSqlite } from "./doctor-session-sqlite.js";
 import {
@@ -87,7 +88,8 @@ describe("doctor state integrity", () => {
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     noteMock.mockClear();
   });
-  afterEach(() => {
+  afterEach(async () => {
+    await cleanupSessionStateForTest({ stateDir, rootPath: tempHome });
     vi.restoreAllMocks();
     closeOpenClawAgentDatabasesForTest();
     closeOpenClawStateDatabaseForTest();
