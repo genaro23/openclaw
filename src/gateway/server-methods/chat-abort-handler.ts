@@ -21,6 +21,7 @@ import {
   type QueuedChatTurnEntry,
 } from "../chat-queued-turns.js";
 import { chatRunBelongsToAgent } from "../chat-run-owner.js";
+import { formatStopRequest } from "../control-plane-audit.js";
 import { pendingChatSendDedupeKey, type DedupeEntry } from "../server-shared.js";
 import {
   resolveRequestedSessionAgentId,
@@ -674,6 +675,7 @@ export async function handleChatAbortRequestWithLifecycle(
 }
 
 export async function handleChatAbortRequest(options: GatewayRequestHandlerOptions): Promise<void> {
+  options.context.logGateway.info(formatStopRequest("chat.abort", options.client, options.params));
   try {
     await handleChatAbortRequestWithLifecycle(options);
   } catch (error) {
