@@ -30,7 +30,11 @@ import {
   ensureUserProfilesSchema,
   hasEnsuredUserProfileRoleSchema,
 } from "./user-profiles-schema.js";
-import type { ProfileDisplayRow, UserProfileEmailBinding } from "./user-profiles.types.js";
+import type {
+  ProfileDisplayRow,
+  UserProfileEmailBinding,
+  UserProfileAuthority,
+} from "./user-profiles.types.js";
 
 export const profileCatalogPath = (options: OpenClawStateDatabaseOptions) =>
   path.resolve(options.path ?? resolveOpenClawStateSqlitePath(options.env ?? process.env));
@@ -144,7 +148,10 @@ export function readUserProfileSnapshotSync(
 }
 
 /** Resolve current authority and display together on the caller's admitted connection. */
-export function readUserProfileAuthorityInDatabase(db: DatabaseSync, profileId: string) {
+export function readUserProfileAuthorityInDatabase(
+  db: DatabaseSync,
+  profileId: string,
+): UserProfileAuthority | undefined {
   return runSqliteDeferredTransactionSync(db, () => {
     const current = tableExists(db, "user_profiles")
       ? selectResolvedUserProfileMetadataById(db, profileId)

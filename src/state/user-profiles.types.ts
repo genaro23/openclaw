@@ -20,6 +20,13 @@ export type UserProfileDisplay = {
   hasAvatar: boolean;
 };
 
+export type UserProfileAuthority = {
+  profileId: string;
+  role: string | null;
+  aliases: string[];
+  display: UserProfileDisplay;
+};
+
 export type CachedGitHubIdentity = { profileId: string; updatedAt: number };
 
 export type StoredGitHubIdentity = { accountId: number; login: string };
