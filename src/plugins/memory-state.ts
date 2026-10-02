@@ -11,6 +11,7 @@ import type {
   MemoryFlushToolsPlan,
   MemoryPluginCapability,
   MemoryPluginCapabilityRegistration,
+  MemoryProviderFlushPlanResolver,
   MemoryPluginPublicArtifact,
   MemoryPluginRuntime,
   MemoryPromptPreparationRegistration,
@@ -41,6 +42,7 @@ export type {
   MemoryPluginCapability,
   MemoryPluginPublicArtifact,
   MemoryPluginPublicArtifactsProvider,
+  MemoryProviderFlushPlanResolver,
   MemoryPluginRuntime,
   MemoryPromptSectionBuilder,
   MemoryPromptSectionParams,
@@ -48,19 +50,33 @@ export type {
   RegisteredMemorySearchManager,
 } from "./registry-contribution-types.js";
 
-type ResolvedMemoryCapabilityRegistration = MemoryPluginCapabilityRegistration & {
-  flushPlanResolverPluginId?: string;
+/** The flush plan resolver a registration supplies, bound to the plugin that supplied it. */
+type MemoryFlushPlanSource = {
+  resolve: MemoryProviderFlushPlanResolver;
+  pluginId: string;
 };
 
+type ResolvedMemoryCapabilityRegistration = MemoryPluginCapabilityRegistration & {
+  flushPlanSource?: MemoryFlushPlanSource;
+};
+
+// A registration's own flush resolver: the provider resolver when declared, else the released one.
+// A complete released plan is a valid file draft, so both resolve through one signature.
+function ownFlushPlanSource(
+  registration: MemoryPluginCapabilityRegistration,
+): MemoryFlushPlanSource | undefined {
+  const resolve =
+    registration.capability.providerFlushPlanResolver ?? registration.capability.flushPlanResolver;
+  return resolve ? { resolve, pluginId: registration.pluginId } : undefined;
+}
+
 // Merged capabilities retain the resolver's original supplier across later sidecars.
-function resolveFlushPlanResolverPluginId(
+function flushPlanSourceOf(
   registration: MemoryPluginCapabilityRegistration | ResolvedMemoryCapabilityRegistration,
-): string | undefined {
-  return "flushPlanResolverPluginId" in registration
-    ? registration.flushPlanResolverPluginId
-    : registration.capability.flushPlanResolver
-      ? registration.pluginId
-      : undefined;
+): MemoryFlushPlanSource | undefined {
+  return "flushPlanSource" in registration
+    ? registration.flushPlanSource
+    : ownFlushPlanSource(registration);
 }
 
 export function resolveMemoryCapabilityRegistration(
@@ -70,12 +86,8 @@ export function resolveMemoryCapabilityRegistration(
   for (const registration of registrations) {
     const existing = effective;
     if (!existing) {
-      effective = {
-        ...registration,
-        ...(registration.capability.flushPlanResolver
-          ? { flushPlanResolverPluginId: registration.pluginId }
-          : {}),
-      };
+      const flushPlanSource = ownFlushPlanSource(registration);
+      effective = { ...registration, ...(flushPlanSource ? { flushPlanSource } : {}) };
       continue;
     }
     const existingOwnsSlot = existing.memorySlotSelected === true;
@@ -85,6 +97,8 @@ export function resolveMemoryCapabilityRegistration(
       // plugin keeps every field it declares regardless of registration order.
       const owner = existingOwnsSlot ? existing : registration;
       const contributor = existingOwnsSlot ? registration : existing;
+      // The owner's flush resolver, when it has one, wins as a unit over the contributor's.
+      const flushPlanSource = flushPlanSourceOf(owner) ?? flushPlanSourceOf(contributor);
       effective = {
         pluginId: owner.pluginId,
         capability: {
@@ -92,13 +106,7 @@ export function resolveMemoryCapabilityRegistration(
           ...owner.capability,
         },
         memorySlotSelected: true,
-        ...(owner.capability.flushPlanResolver || contributor.capability.flushPlanResolver
-          ? {
-              flushPlanResolverPluginId: resolveFlushPlanResolverPluginId(
-                owner.capability.flushPlanResolver ? owner : contributor,
-              ),
-            }
-          : {}),
+        ...(flushPlanSource ? { flushPlanSource } : {}),
       };
       continue;
     }
@@ -106,8 +114,11 @@ export function resolveMemoryCapabilityRegistration(
       Boolean(registration.capability.publicArtifacts) &&
       !registration.capability.promptBuilder &&
       !registration.capability.flushPlanResolver &&
+      !registration.capability.providerFlushPlanResolver &&
       !registration.capability.runtime &&
       !registration.capability.providerRuntime;
+    const flushPlanSource =
+      ownFlushPlanSource(registration) ?? (preserveExisting ? existing.flushPlanSource : undefined);
     effective = {
       pluginId: registration.pluginId,
       capability: {
@@ -115,11 +126,7 @@ export function resolveMemoryCapabilityRegistration(
         ...registration.capability,
       },
       memorySlotSelected: registration.memorySlotSelected,
-      ...(registration.capability.flushPlanResolver
-        ? { flushPlanResolverPluginId: registration.pluginId }
-        : preserveExisting && existing.flushPlanResolverPluginId
-          ? { flushPlanResolverPluginId: existing.flushPlanResolverPluginId }
-          : {}),
+      ...(flushPlanSource ? { flushPlanSource } : {}),
     };
   }
   return effective;
@@ -396,20 +403,19 @@ export function resolveMemoryFlushPlan(params: {
   contextWindowTokens?: number;
 }): MemoryFlushPlanResolution | null {
   const registration = getMemoryCapability();
-  const resolver = registration?.capability.flushPlanResolver;
-  if (!registration || !resolver) {
+  const source = registration?.flushPlanSource;
+  if (!registration || !source) {
     return null;
   }
-  const plan = resolver(params);
+  const plan = source.resolve(params);
   if (!plan) {
     return null;
   }
-  const pluginId = registration.flushPlanResolverPluginId ?? registration.pluginId;
   return {
     plan,
-    pluginId,
+    pluginId: source.pluginId,
     selectedSlotOwner:
-      registration.memorySlotSelected === true && pluginId === registration.pluginId,
+      registration.memorySlotSelected === true && source.pluginId === registration.pluginId,
   };
 }
 
@@ -421,10 +427,10 @@ export function resolveMemoryFlushPlan(params: {
 export function isMemoryFlushPlanNativeProviderOwned(): boolean {
   const registration = getMemoryCapability();
   return Boolean(
-    registration?.capability.flushPlanResolver &&
+    registration?.flushPlanSource &&
     registration.capability.providerRuntime &&
     registration.memorySlotSelected === true &&
-    (registration.flushPlanResolverPluginId ?? registration.pluginId) === registration.pluginId,
+    registration.flushPlanSource.pluginId === registration.pluginId,
   );
 }
 

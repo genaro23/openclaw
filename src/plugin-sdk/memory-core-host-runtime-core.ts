@@ -37,6 +37,7 @@ export type {
   MemoryFlushToolsPlan,
   MemoryPluginRuntime,
   MemoryPromptSectionBuilder,
+  MemoryProviderFlushPlanResolver,
 } from "../plugins/memory-state.js";
 export {
   listMemoryArtifactProvenance,

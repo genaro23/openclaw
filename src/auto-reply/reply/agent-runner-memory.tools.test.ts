@@ -139,7 +139,7 @@ describe("provider-owned memory flush", () => {
   // existing file-arm fixtures intentionally have neither of these grants.
   function registerToolsFlushPlan(sidecar = false) {
     const registry = createEmptyPluginRegistry();
-    const flushPlanResolver = () => ({
+    const providerFlushPlanResolver = () => ({
       softThresholdTokens: 4_000,
       forceFlushTranscriptBytes: 1_000_000_000,
       reserveTokensFloor: 20_000,
@@ -154,12 +154,15 @@ describe("provider-owned memory flush", () => {
       // A native slot owner registers the provider-neutral runtime with its tools plan.
       capability: sidecar
         ? {}
-        : { flushPlanResolver, providerRuntime: { open: vi.fn(async () => ({ provider: null })) } },
+        : {
+            providerFlushPlanResolver,
+            providerRuntime: { open: vi.fn(async () => ({ provider: null })) },
+          },
     });
     if (sidecar) {
       registry.memoryCapabilities.push({
         pluginId: "memory-sidecar",
-        capability: { flushPlanResolver },
+        capability: { providerFlushPlanResolver },
       });
     }
     setActivePluginRegistry(registry);

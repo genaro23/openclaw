@@ -229,29 +229,39 @@ describe("memory plugin state", () => {
   });
 
   it.each([
-    { ownerFirst: true, ownerSuppliesResolver: true },
-    { ownerFirst: false, ownerSuppliesResolver: true },
-    { ownerFirst: true, ownerSuppliesResolver: false },
-    { ownerFirst: false, ownerSuppliesResolver: false },
-  ])("retains effective flush resolver provenance through sidecars: %j", (testCase) => {
+    { ownerFirst: true, ownerResolver: "provider" },
+    { ownerFirst: false, ownerResolver: "provider" },
+    { ownerFirst: true, ownerResolver: "released" },
+    { ownerFirst: false, ownerResolver: "released" },
+    { ownerFirst: true, ownerResolver: undefined },
+    { ownerFirst: false, ownerResolver: undefined },
+  ] as const)("retains effective flush resolver provenance through sidecars: %j", (testCase) => {
     const registry = createEmptyPluginRegistry();
-    const sidecarPlan = createMemoryFlushPlan("memory/sidecar.md");
-    const ownerPlan = {
-      softThresholdTokens: 1,
-      forceFlushTranscriptBytes: 2,
-      reserveTokensFloor: 3,
-      prompt: "Save through provider tools",
+    const ownerFilePlan = createMemoryFlushPlan("memory/owner.md");
+    const toolsPlan = (prompt: string) => ({
+      prompt,
       systemPrompt: "Persist durable memories",
       persistenceToolNames: ["save_memory"],
-    };
+    });
+    const ownerToolsPlan = toolsPlan("Save through owner tools");
+    const sidecarToolsPlan = toolsPlan("Save through sidecar tools");
     const owner = {
       pluginId: "memory-provider",
       memorySlotSelected: true,
-      capability: testCase.ownerSuppliesResolver ? { flushPlanResolver: () => ownerPlan } : {},
+      capability:
+        testCase.ownerResolver === "provider"
+          ? { providerFlushPlanResolver: () => ownerToolsPlan }
+          : testCase.ownerResolver === "released"
+            ? { flushPlanResolver: () => ownerFilePlan }
+            : {},
     };
+    // The sidecar offers both resolvers; neither may be combined with the owner's.
     const sidecar = {
       pluginId: "memory-sidecar",
-      capability: { flushPlanResolver: () => sidecarPlan },
+      capability: {
+        flushPlanResolver: () => createMemoryFlushPlan("memory/sidecar.md"),
+        providerFlushPlanResolver: () => sidecarToolsPlan,
+      },
     };
     registry.memoryCapabilities.push(
       ...(testCase.ownerFirst ? [owner, sidecar] : [sidecar, owner]),
@@ -263,11 +273,15 @@ describe("memory plugin state", () => {
     );
     setActivePluginRegistry(registry);
 
-    expect(resolveMemoryFlushPlan({})).toEqual({
-      plan: testCase.ownerSuppliesResolver ? ownerPlan : sidecarPlan,
-      pluginId: testCase.ownerSuppliesResolver ? "memory-provider" : "memory-sidecar",
-      selectedSlotOwner: testCase.ownerSuppliesResolver,
-    });
+    expect(resolveMemoryFlushPlan({})).toEqual(
+      testCase.ownerResolver
+        ? {
+            plan: testCase.ownerResolver === "provider" ? ownerToolsPlan : ownerFilePlan,
+            pluginId: "memory-provider",
+            selectedSlotOwner: true,
+          }
+        : { plan: sidecarToolsPlan, pluginId: "memory-sidecar", selectedSlotOwner: false },
+    );
   });
 
   it("passes agent context through the primary and supplemental prompt builders", () => {

@@ -232,18 +232,31 @@ export type MemoryFlushToolsPlan = Partial<MemoryFlushPlanTiming> & {
   model?: string;
   prompt: string;
   systemPrompt: string;
-  /** Absent on every tools plan, so resolver readers may still read `relativePath`. */
+  /** Absent on every tools plan; a tools plan never names a workspace file. */
   relativePath?: never;
   persistenceToolNames: readonly string[];
   /** Read-only helper tools the flush may use to inspect existing provider memory. */
   lookupToolNames?: readonly string[];
 };
 
-export type MemoryFlushPlanResolver = (params: {
+type MemoryFlushPlanResolverParams = {
   cfg?: OpenClawConfig;
   nowMs?: number;
   contextWindowTokens?: number;
-}) => MemoryFlushFilePlanDraft | MemoryFlushToolsPlan | null;
+};
+
+/** Resolves a complete file flush plan; its contract is unchanged from earlier releases. */
+export type MemoryFlushPlanResolver = (
+  params: MemoryFlushPlanResolverParams,
+) => MemoryFlushPlan | null;
+
+/**
+ * Resolves a flush plan the host completes: a file plan whose omitted timing the host fills,
+ * or a tools plan that persists through the selected slot owner's own tools.
+ */
+export type MemoryProviderFlushPlanResolver = (
+  params: MemoryFlushPlanResolverParams,
+) => MemoryFlushFilePlanDraft | MemoryFlushToolsPlan | null;
 
 export type RegisteredMemorySearchManager = Omit<MemorySearchManager, "readFile"> & {
   readFile(
@@ -333,6 +346,8 @@ export type MemoryPluginPublicArtifactsProvider = {
 export type MemoryPluginCapability = {
   promptBuilder?: MemoryPromptSectionBuilder;
   flushPlanResolver?: MemoryFlushPlanResolver;
+  /** Host-completed flush plans, including tool persistence; preferred over flushPlanResolver. */
+  providerFlushPlanResolver?: MemoryProviderFlushPlanResolver;
   runtime?: MemoryPluginRuntime;
   /** Provider-neutral host integration; preferred over runtime when present. */
   providerRuntime?: MemoryProviderRuntime;

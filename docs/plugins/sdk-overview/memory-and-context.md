@@ -61,16 +61,23 @@ engine unchanged, and tries that engine again on the next logical turn.
 
 ## Pre-compaction memory flush
 
-Register `flushPlanResolver` on `MemoryPluginCapability` to supply the silent
+Register a flush resolver on `MemoryPluginCapability` to supply the silent
 turn that saves durable context before compaction. OpenClaw resolves flush
 timing first from `agents.defaults.compaction.memoryFlush` and the active
 context window. When `enabled` is `false`, the host does not invoke the
 resolver. Return `null` to skip the flush for provider-specific reasons.
 
-The resolver returns one of two plan types, each with `prompt`, `systemPrompt`,
-and one persistence arm. A file plan is a `MemoryFlushFilePlanDraft`; a complete
-`MemoryFlushPlan`, unchanged from earlier releases, is one such draft. A tools
-plan is a `MemoryFlushToolsPlan`. In both, the `softThresholdTokens`,
+There are two resolver fields:
+
+- `flushPlanResolver` returns a complete `MemoryFlushPlan` or `null`. Its
+  contract is unchanged from earlier releases. Memory Core uses it.
+- `providerFlushPlanResolver` returns a plan the host completes: a
+  `MemoryFlushFilePlanDraft` (a complete `MemoryFlushPlan` is one such draft)
+  or a `MemoryFlushToolsPlan`. When a plugin registers both, the host uses
+  `providerFlushPlanResolver`.
+
+Each plan has `prompt`, `systemPrompt`, and one persistence arm. In plans from
+`providerFlushPlanResolver`, the `softThresholdTokens`,
 `forceFlushTranscriptBytes`, `reserveTokensFloor`, and `model` fields are
 deliberate provider overrides. The host fills omitted timing fields from its
 resolved timing, and fills an omitted `model` from `memoryFlush.model` for the
@@ -85,9 +92,10 @@ Choose exactly one persistence arm:
 | File  | `relativePath: string`                                                                                           | `read` and an append-only `write` restricted to the target file. The host creates the target and requires writable workspace access. Memory Core uses this arm.                                                |
 | Tools | `persistenceToolNames: readonly string[]` (non-empty), optional `lookupToolNames: readonly string[]` (read-only) | `read` plus the declared persistence and lookup tools owned by the selected memory plugin. The host creates no target file and does not require writable workspace access. Lookup tools cannot persist memory. |
 
-Only the selected memory slot owner may supply a tools-arm plan. The host tracks
-which plugin supplied the effective resolver, including when sidecar capability
-fields are merged. A tools-arm plan from a non-owner is skipped with a warning
+Only the selected memory slot owner may supply a tools-arm plan, through
+`providerFlushPlanResolver`. The host tracks which plugin supplied the effective
+resolver, including when sidecar capability fields are merged; an owner's
+resolver of either kind wins over a sidecar's. A tools-arm plan from a non-owner is skipped with a warning
 naming that plugin.
 
 For the tools arm, ownership comes from registered tool metadata. A same-named
