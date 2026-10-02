@@ -7,6 +7,7 @@ import { DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS } from "openclaw/plugin-sdk/channel-
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import { MediaFetchError } from "openclaw/plugin-sdk/media-runtime";
 import {
   createChannelIngressQueueForTests,
@@ -101,8 +102,8 @@ const { createTelegramTransportIngressMonitor } =
   await import("./telegram-ingress-drain-factory.js");
 const { setTelegramRuntime } = await import("./runtime.js");
 const { resetTelegramAccountThrottlersForTest } = await import("./runtime.test-support.js");
-const { openTelegramIngressQueue, telegramQueueEventId } =
-  await import("./telegram-ingress-spool.js");
+const ingressSpool = await import("./telegram-ingress-spool.js");
+const { openTelegramIngressQueue, telegramQueueEventId } = ingressSpool;
 const { writeTelegramSpooledUpdate } = await import("./telegram-ingress-spool.test-support.js");
 const messageDispatchDedupe = await import("./message-dispatch-dedupe.js");
 const processingOutcome = await import("./bot-processing-outcome.js");
@@ -456,6 +457,81 @@ describe("Telegram durable ingress coalescing", () => {
       });
     } finally {
       quietTimers.mockRestore();
+    }
+  });
+
+  it("flushes an album at its hold deadline while the backlog read is pending", async () => {
+    const queue = openTelegramIngressQueue({ stateDir });
+    const openQueue = vi.spyOn(ingressSpool, "openTelegramIngressQueue").mockReturnValue(queue);
+    const { monitor } = await createMonitor();
+    vi.useFakeTimers({ toFake: ["performance"] });
+    const albumTimers = holdTelegramMediaTimeouts(40);
+    const readStarted = createDeferred<void>();
+    const releaseRead = createDeferred<void>();
+    const dispatched = captureNextDownstreamTurn();
+    try {
+      monitor.start();
+      await monitor.admit(
+        photoUpdate({ updateId: 1_401, messageId: 1, caption: "Deadline photo album" }),
+      );
+      await monitor.waitForIdle();
+      await monitor.pause();
+      await writeTelegramSpooledUpdate({
+        stateDir,
+        update: photoUpdate({ updateId: 1_402, messageId: 2 }),
+      });
+      expect(await queue.listPending({ limit: "all" })).toMatchObject([
+        { id: telegramQueueEventId(1_402) },
+      ]);
+      const listUnsettled = queue.listUnsettled?.bind(queue);
+      if (!listUnsettled) {
+        throw new Error("Expected the ingress queue's coherent backlog reader");
+      }
+      vi.spyOn(queue, "listUnsettled").mockImplementationOnce(async (options) => {
+        const rows = await listUnsettled(options);
+        readStarted.resolve();
+        await releaseRead.promise;
+        return rows;
+      });
+      const quietFlush = resolveFlushTimerForDelay(albumTimers, 40);
+      if (!quietFlush) {
+        throw new Error("Expected the buffered album's quiet timer");
+      }
+      albumTimers.mockRestore();
+      vi.useFakeTimers({
+        toFake: ["performance", "setTimeout", "clearTimeout"],
+        shouldClearNativeTimers: true,
+      });
+      vi.advanceTimersByTime(40);
+      quietFlush();
+      await readStarted.promise;
+      const enqueued = vi.spyOn(KeyedAsyncQueue.prototype, "enqueue");
+
+      await vi.advanceTimersByTimeAsync(19_959);
+      expect(downstreamTurns).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(enqueued).toHaveBeenCalledOnce();
+      const albumQueue = enqueued.mock.contexts[0];
+      const flush = enqueued.mock.results[0];
+      if (flush?.type === "return") {
+        await flush.value;
+      }
+      const turn = await dispatched;
+      await monitor.waitForDeferredClaims();
+      expect(turn.Body).toContain("Deadline photo album");
+      expect(turn).toMatchObject({ media: [{ path: "/tmp/photo-1.jpg", kind: "image" }] });
+
+      releaseRead.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(enqueued.mock.contexts.filter((context) => context === albumQueue)).toHaveLength(1);
+      expect(downstreamTurns).toHaveBeenCalledOnce();
+      expect(await queue.listPending({ limit: "all" })).toMatchObject([
+        { id: telegramQueueEventId(1_402) },
+      ]);
+    } finally {
+      releaseRead.resolve();
+      albumTimers.mockRestore();
+      openQueue.mockRestore();
     }
   });
 
