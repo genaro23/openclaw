@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import { recordReadOnlyWebhookCompletion } from "../commands/doctor/shared/legacy-webhook-pins.js";
+import { recordUnwrittenWebhookCompletion } from "../commands/doctor/shared/legacy-webhook-pins.js";
 import { createConfigIO } from "../config/io.factory.js";
 import { replaceConfigFile } from "../config/mutate.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -180,7 +180,9 @@ describe("Doctor historical webhook pins", () => {
     await fs.symlink(firstGeneration, configPath, "file");
     const fresh = migrate(config, readOnlyEnv);
     expect(fresh.config.meta?.migrations?.webhookListeners).toBe(true);
-    expect(recordReadOnlyWebhookCompletion(config, fresh, readOnlyEnv)).toBe(true);
+    expect(
+      recordUnwrittenWebhookCompletion({ exists: true, sourceConfig: config }, fresh, readOnlyEnv),
+    ).toBe(true);
     expect(migrate(config, readOnlyEnv)).toEqual({ config, changes: [] });
     expect(recordGatewayBootStart(env, 1_800_000_000_000)).toBeDefined();
 
