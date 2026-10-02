@@ -124,14 +124,17 @@ function toWorkerStreamEvent(
         timestamp: event.partial.timestamp,
       };
     case "text_start":
-    case "text_end": {
+    case "text_end":
+    case "thinking_end": {
       const content = event.partial.content[event.contentIndex];
+      const contentSignature =
+        event.type === "thinking_end"
+          ? content?.type === "thinking" && content.thinkingSignature
+          : content?.type === "text" && content.textSignature;
       return {
         type: event.type,
         contentIndex: event.contentIndex,
-        ...(content?.type === "text" && content.textSignature
-          ? { contentSignature: content.textSignature }
-          : {}),
+        ...(contentSignature ? { contentSignature } : {}),
       };
     }
     case "thinking_start":
@@ -139,22 +142,6 @@ function toWorkerStreamEvent(
     case "text_delta":
     case "thinking_delta":
       return { type: event.type, contentIndex: event.contentIndex, delta: event.delta };
-    case "thinking_end": {
-      const content = event.partial.content[event.contentIndex];
-      return {
-        type: "thinking_end",
-        contentIndex: event.contentIndex,
-        ...(content?.type === "thinking" && content.thinkingSignature
-          ? { contentSignature: content.thinkingSignature }
-          : {}),
-      };
-    }
-    case "toolcall_start":
-    case "toolcall_delta":
-    case "toolcall_end":
-    case "done":
-    case "error":
-      return undefined;
   }
   return undefined;
 }
@@ -321,9 +308,9 @@ async function resolveApprovedModel(params: {
       modelId: resolved.ref.model,
       agentDir,
       modelIdSource: "selected",
-      ...(selectedProfileId ? { profileId: selectedProfileId } : {}),
-      ...(selectedProfileId ? { preferredProfile: selectedProfileId } : {}),
-      ...(selectedProfileId ? { bindAuthOwner: true } : {}),
+      ...(selectedProfileId
+        ? { profileId: selectedProfileId, preferredProfile: selectedProfileId, bindAuthOwner: true }
+        : {}),
       allowMissingApiKeyModes: ["aws-sdk"],
       allowBundledStaticCatalogFallback: true,
       signal,

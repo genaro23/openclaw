@@ -290,8 +290,7 @@ export async function startAgentRunExecution(params: StartAgentRunExecutionParam
         let message = prepared.userTurn.message;
         let execApprovalContinuationPromptRange =
           prepared.userTurn.execApprovalContinuationPromptRange;
-        const execApprovalContinuationTranscriptPromptRange =
-          prepared.userTurn.execApprovalContinuationTranscriptPromptRange;
+        const execApprovalContinuationTranscriptPromptRange = execApprovalContinuationPromptRange;
 
         // Admission owns plugin/settlement adoption; other inter-session work
         // must leave the paused task's completion lifecycle with its owner.
