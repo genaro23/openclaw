@@ -35,6 +35,7 @@ export function resolveWorkerPlacementSessionRuntime(params: {
         const target = resolveGatewaySessionStoreTargetWithStore({
           ...params,
           key: params.sessionKey,
+          preserveQualifiedAddress: true,
           clone: false,
           readOnly: true,
           exactRead: true,
