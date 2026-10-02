@@ -254,8 +254,12 @@ export function resolveNewSessionSubmitBlock(
       ),
     };
   }
+  const placementTarget = resolveDraftSessionPlacement(draft.pendingPlacement, place).target;
+  const cloudProfileId = placementTarget?.kind === "profile" ? placementTarget.profileId : "";
+  const cloudProfile = gateway.cloudProfiles.find((profile) => profile.id === cloudProfileId);
   const modelUnavailableMessage =
-    kind === "session" && place.modelControl.modelSelectionBlockedReason(place.selectedAgent());
+    kind === "session" &&
+    place.modelControl.modelSelectionBlockedReason(place.selectedAgent(), cloudProfile?.inference);
   if (modelUnavailableMessage) {
     return { gate: "model-unavailable", reason: modelUnavailableMessage };
   }
@@ -276,23 +280,17 @@ export function resolveNewSessionSubmitBlock(
   if ((place.deviceId || place.autoDevice) && deviceRuntimeUnsupportedReason) {
     return { gate: "device-runtime", reason: deviceRuntimeUnsupportedReason };
   }
-  const placementTarget = resolveDraftSessionPlacement(draft.pendingPlacement, place).target;
   if (
     placementTarget &&
     (!client.recoveryScope || !client.recoveryScopeReady || gateway.cloudProfilesPending)
   ) {
     return { gate: "placement-recovery", reason: t("newSession.placementNotReady") };
   }
-  const cloudProfileId = placementTarget?.kind === "profile" ? placementTarget.profileId : "";
   const cloudRuntimeUnsupportedReason = () =>
-    place.modelControl.cloudRuntimeUnsupportedReason(
-      gateway.cloudProfiles.find((profile) => profile.id === place.cloudProfileId),
-    );
+    place.modelControl.cloudRuntimeUnsupportedReason(cloudProfile);
   if (
     cloudProfileId &&
-    (!gateway.cloudProfilesReady ||
-      !gateway.cloudProfiles.some((profile) => profile.id === cloudProfileId) ||
-      Boolean(cloudRuntimeUnsupportedReason()))
+    (!gateway.cloudProfilesReady || !cloudProfile || Boolean(cloudRuntimeUnsupportedReason()))
   ) {
     const reason = cloudRuntimeUnsupportedReason() ?? t("newSession.placementNotReady");
     return { gate: "cloud", reason };
