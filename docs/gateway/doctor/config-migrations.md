@@ -250,6 +250,8 @@ SQLite machine state only when the completion marker is the sole required change
 If endpoints or other channel settings need repair, update that external source
 and its completion marker as directed by the startup error. Startup refuses to
 drop an unmigrated endpoint. A fresh read-only installation needs no pins.
+When no config file exists yet, startup can record the same marker-only completion
+without creating a config file that would interfere with `gateway --dev` setup.
 
 The existing explicit-key migrations remain supported: `webhookPort` and
 `webhookHost` become `legacyWebhook: { port, host? }`; Teams `webhook.port` becomes

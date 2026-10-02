@@ -4,7 +4,7 @@ import type { ChannelDoctorConfigMutation } from "../../../channels/plugins/type
 import { getConfigValueAtPath, setConfigValueAtPath } from "../../../config/config-paths.js";
 import { resolveConfigPath, resolveIsConfigReadOnly } from "../../../config/paths.js";
 import { cloneConfigWithResolutionFacts } from "../../../config/resolution-facts.js";
-import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+import type { ConfigFileSnapshot, OpenClawConfig } from "../../../config/types.js";
 import { isTruthyEnvValue } from "../../../infra/env.js";
 import {
   executeSqliteQueryTakeFirstSync,
@@ -24,29 +24,33 @@ import type { DB } from "../../../state/openclaw-state-db.generated.js";
 
 export const HISTORICAL_WEBHOOK_CHANNELS = ["telegram", "feishu", "msteams", "nextcloud-talk"];
 
-function readOnlyMarkerKey(env: NodeJS.ProcessEnv): string {
+function webhookCompletionKey(env: NodeJS.ProcessEnv): string {
   return `webhookListeners:${resolveConfigPath(env)}`;
 }
 
 /** No config bytes changed, so this completion does not depend on config rollback. */
-export function recordReadOnlyWebhookCompletion(
-  before: OpenClawConfig,
+export function recordUnwrittenWebhookCompletion(
+  snapshot: Pick<ConfigFileSnapshot, "exists" | "sourceConfig">,
   mutation: ChannelDoctorConfigMutation,
   env: NodeJS.ProcessEnv,
 ): boolean {
-  if (!resolveIsConfigReadOnly(env)) {
+  const readOnly = resolveIsConfigReadOnly(env);
+  if (snapshot.exists && !readOnly) {
     return false;
   }
-  const markerOnly = cloneConfigWithResolutionFacts(before);
+  const markerOnly = cloneConfigWithResolutionFacts(snapshot.sourceConfig);
   markerOnly.meta ??= {};
   markerOnly.meta.migrations ??= {};
   markerOnly.meta.migrations.webhookListeners = mutation.config.meta?.migrations?.webhookListeners;
   if (!isDeepStrictEqual(markerOnly, mutation.config)) {
+    if (!readOnly) {
+      return false;
+    }
     throw new Error(
       `Webhook listeners need migration in the externally managed config. Add the required legacyWebhook endpoints and meta.migrations.webhookListeners completion marker in that source, then restart.\n${mutation.changes.join("\n")}`,
     );
   }
-  writeConfigMachineState(readOnlyMarkerKey(env), markerOnly.meta.migrations.webhookListeners, {
+  writeConfigMachineState(webhookCompletionKey(env), markerOnly.meta.migrations.webhookListeners, {
     env,
   });
   return true;
@@ -66,7 +70,7 @@ export function applyHistoricalWebhookPins(
   const env = context.env ?? process.env;
   const marker =
     mutation.config.meta?.migrations?.webhookListeners ??
-    readConfigMachineState<true | Record<string, string[][]>>(readOnlyMarkerKey(env), { env });
+    readConfigMachineState<true | Record<string, string[][]>>(webhookCompletionKey(env), { env });
   if (marker === true || mutation.warnings?.length) {
     return mutation;
   }

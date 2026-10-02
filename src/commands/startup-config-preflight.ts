@@ -157,7 +157,7 @@ async function prepareStartupConfig(
         read = persisted.snapshotRead;
       }
     }
-    const { HISTORICAL_WEBHOOK_CHANNELS, recordReadOnlyWebhookCompletion } =
+    const { HISTORICAL_WEBHOOK_CHANNELS, recordUnwrittenWebhookCompletion } =
       await import("./doctor/shared/legacy-webhook-pins.js");
     const webhookCompletion = read.snapshot.sourceConfig.meta?.migrations?.webhookListeners;
     if (
@@ -183,7 +183,7 @@ async function prepareStartupConfig(
       if (migration.changes.length) {
         await beforeStatePreparation(read.snapshot);
         assertPreflightConfigUnchanged(read.snapshot, (await readSnapshot()).snapshot);
-        if (!recordReadOnlyWebhookCompletion(read.snapshot.sourceConfig, migration, env)) {
+        if (!recordUnwrittenWebhookCompletion(read.snapshot, migration, env)) {
           const { transformConfigFile } = await import("../config/mutate.js");
           const committedWrite = await transformConfigFile({
             base: "source",

@@ -230,6 +230,7 @@ it.each([
   }
 
   const cfg: OpenClawConfig = {
+    meta: { migrations: { webhookListeners: true } },
     ...(enabled === undefined
       ? {}
       : {
