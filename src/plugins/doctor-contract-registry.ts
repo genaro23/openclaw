@@ -8,6 +8,7 @@ import { applyHistoricalWebhookPins } from "../commands/doctor/shared/legacy-web
 import { GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA } from "../config/bundled-channel-config-metadata.generated.js";
 import { discoverConfigWidePluginManifestRegistry } from "../config/io.plugin-metadata.js";
 import type { LegacyConfigRule } from "../config/legacy.shared.js";
+import { cloneConfigWithResolutionFacts } from "../config/resolution-facts.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -84,6 +85,7 @@ type PluginDoctorContractEntry = Omit<
 > & {
   pluginId: string;
   origin?: PluginManifestRegistryRecord["origin"];
+  historicalWebhookNormalizer?: PluginDoctorCompatibilityNormalizer;
 };
 
 function isTrustedForDurableStores(record: PluginManifestRegistryRecord): boolean {
@@ -251,24 +253,30 @@ function resolvePluginDoctorContracts(
   if (params.surface !== "configRepair") {
     return entries;
   }
-  const ownedChannels = new Set(records.flatMap((record) => record.channels));
-  const installedPluginIds = new Set(records.map((record) => record.id));
   for (const { channelId, pluginId } of GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA) {
+    const owner = records.find(
+      (record) => record.id === pluginId || record.channels.includes(channelId),
+    );
+    const supplement =
+      params.historicalWebhookListeners &&
+      owner?.id === pluginId &&
+      owner.trustedOfficialInstall === true
+        ? entries.find((entry) => entry.pluginId === pluginId && !entry.historicalWebhookListener)
+        : undefined;
     if (
       deferredPluginMigrations.getStore()?.has(pluginId) ||
       (!params.historicalWebhookListeners &&
         !Object.hasOwn(params.config?.channels ?? {}, channelId) &&
         !Object.hasOwn(params.config?.plugins?.entries ?? {}, pluginId)) ||
-      ownedChannels.has(channelId) ||
-      installedPluginIds.has(pluginId) ||
+      (owner && !supplement) ||
       (params.pluginIds &&
         !params.pluginIds.includes(channelId) &&
         !params.pluginIds.includes(pluginId))
     ) {
       continue;
     }
-    // Retain the core-version config migration for absent external plugins. An installed
-    // owner, including one with a broken contract, is never replaced by this upgrade path.
+    // Installed owners retain config repair; host contracts can supply historical listener facts.
+    // Absent external plugins retain the core-version config migration.
     const mod = loadBundledPluginPublicArtifactModuleFromCandidatesSync<PluginDoctorContractModule>(
       {
         dirName: channelId,
@@ -280,7 +288,12 @@ function resolvePluginDoctorContracts(
       continue;
     }
     const { summary: _summary, ...contract } = coercePluginDoctorContractModule(mod, [channelId]);
-    entries.push({ pluginId, ...contract, origin: "bundled" });
+    if (supplement && contract.historicalWebhookListener && contract.normalizeCompatibilityConfig) {
+      supplement.historicalWebhookListener = contract.historicalWebhookListener;
+      supplement.historicalWebhookNormalizer = contract.normalizeCompatibilityConfig;
+    } else if (!owner) {
+      entries.push({ pluginId, ...contract, origin: "bundled" });
+    }
   }
   return entries;
 }
@@ -740,12 +753,15 @@ export function applyPluginDoctorCompatibilityMigrations(
         pluginId: entry.pluginId,
         normalizeCompatibilityConfig: entry.normalizeCompatibilityConfig,
         transform: params?.historicalWebhookListeners
-          ? (mutation: ReturnType<PluginDoctorCompatibilityNormalizer>) =>
-              applyHistoricalWebhookPins(mutation, entry.historicalWebhookListener, {
-                ...params,
-                pluginId: entry.pluginId,
-                origin: entry.origin,
-              })
+          ? (mutation: ReturnType<PluginDoctorCompatibilityNormalizer>) => {
+              if (entry.historicalWebhookNormalizer) {
+                mutation.historicalWebhookAccountIds = entry.historicalWebhookNormalizer({
+                  cfg: cloneConfigWithResolutionFacts(mutation.config),
+                }).historicalWebhookAccountIds;
+              }
+              const context = { ...params, pluginId: entry.pluginId, origin: entry.origin };
+              return applyHistoricalWebhookPins(mutation, entry.historicalWebhookListener, context);
+            }
           : undefined,
       };
     }),

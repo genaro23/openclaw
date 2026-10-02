@@ -71,7 +71,7 @@ async function fixture(
       manifestRegistry,
       historicalWebhookListeners: true,
     });
-  return { configPath, env, migrate };
+  return { configPath, env, migrate, manifestRegistry };
 }
 
 function channelConfig(accounts: Record<string, Record<string, unknown>>): OpenClawConfig {
@@ -79,6 +79,98 @@ function channelConfig(accounts: Record<string, Record<string, unknown>>): OpenC
 }
 
 describe("Doctor historical webhook pins", () => {
+  it.each([
+    {
+      name: "reported installed repair",
+      reported: true,
+      trusted: true,
+      policy: "enabled",
+      pin: true,
+    },
+    {
+      name: "unreported installed edit",
+      reported: false,
+      trusted: true,
+      policy: "enabled",
+      pin: false,
+    },
+    { name: "untrusted owner", reported: true, trusted: false, policy: "enabled", pin: false },
+    { name: "disabled plugins", reported: true, trusted: true, policy: "disabled", pin: false },
+    {
+      name: "restrictive allowlist",
+      reported: true,
+      trusted: true,
+      policy: "allowlist",
+      pin: false,
+    },
+    { name: "denied owner", reported: true, trusted: true, policy: "deny", pin: false },
+  ])(
+    "supplements historical facts without replacing $name",
+    async ({ reported, trusted, policy, pin }) => {
+      const { configPath, env, migrate, manifestRegistry } = await fixture();
+      const installed = manifestRegistry.plugins[0];
+      if (!installed) {
+        throw new Error("Missing installed fixture");
+      }
+      installed.origin = "global";
+      installed.trustedOfficialInstall = trusted;
+      const root = path.dirname(configPath);
+      await fs.writeFile(
+        path.join(root, "doctor-contract-api.cjs"),
+        `module.exports = {
+        normalizeCompatibilityConfig: ({ cfg }) => {
+          cfg.gateway = { port: 17777 };
+          return { config: cfg, changes: ${JSON.stringify(reported ? ["installed repair"] : [])} };
+        }
+      };\n`,
+      );
+      const bundledRoot = path.join(root, "bundled");
+      const pluginRoot = path.join(bundledRoot, "nextcloud-talk");
+      await fs.mkdir(pluginRoot, { recursive: true });
+      await fs.writeFile(path.join(pluginRoot, "package.json"), '{"type":"commonjs"}\n');
+      await fs.writeFile(
+        path.join(pluginRoot, "config-doctor-api.js"),
+        `module.exports = {
+        historicalWebhookListener: ${JSON.stringify({ channelId: "nextcloud-talk", ...endpoint })},
+        normalizeCompatibilityConfig: ({ cfg }) => {
+          const eligible = cfg.gateway?.port === 17777;
+          cfg.gateway = { port: 19999 };
+          return { config: cfg, changes: ["host repair"], historicalWebhookAccountIds: eligible ? ["work"] : [] };
+        }
+      };\n`,
+      );
+      const config: OpenClawConfig = {
+        gateway: { port: 16666 },
+        channels: { "nextcloud-talk": { enabled: true, accounts: { work: { enabled: true } } } },
+        plugins:
+          policy === "disabled"
+            ? { enabled: false }
+            : policy === "allowlist"
+              ? { allow: ["different-plugin"] }
+              : policy === "deny"
+                ? { deny: ["nextcloud-talk"] }
+                : {},
+      };
+      const result = migrate(config, {
+        ...env,
+        VITEST: "true",
+        OPENCLAW_UPDATE_IN_PROGRESS: "1",
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "0",
+        OPENCLAW_BUNDLED_PLUGINS_DIR: bundledRoot,
+        OPENCLAW_TEST_TRUST_BUNDLED_PLUGINS_DIR: "1",
+      });
+      expect(result.warnings).toBeUndefined();
+      expect(result.config.gateway).toEqual({ port: reported ? 17777 : 16666 });
+      expect(result.config.channels?.["nextcloud-talk"]).toEqual({
+        enabled: true,
+        accounts: { work: { enabled: true, ...(pin ? { legacyWebhook: endpoint } : {}) } },
+      });
+      expect(result.changes.includes("installed repair")).toBe(reported);
+      expect(result.changes).not.toContain("host repair");
+      expect(config.gateway).toEqual({ port: 16666 });
+    },
+  );
+
   it("uses no-op eligibility without publishing unreported hook edits", async () => {
     const { env, migrate } = await fixture(["work"], { unreportedEdit: true });
     const config = channelConfig({ work: { enabled: true } });

@@ -241,9 +241,13 @@ the migration; an empty list means the channel needed no pin.
 
 Keep this marker when removing a pin. Subsequent Doctor runs, restarts, and
 updates will not recreate it. Account pins cover only accounts present during
-migration. A plugin with an older Doctor contract can remain pending while other
-channels finish. Replacing that plugin runs the same migration through the
-installer's backed-up config publication before its new runtime starts.
+migration. For trusted official plugins with older Doctor contracts, Doctor uses
+historical listener facts shipped with the Gateway. The installed plugin retains
+ownership of its other config migrations. Other plugins can remain pending while
+other channels finish. Replacing a pending plugin runs the same migration through
+the installer's backed-up config publication before its new runtime starts.
+Update a retained older standalone plugin before removing its pin; older plugin
+versions can still open their historical default port.
 
 For a read-only external config source, startup records completion in canonical
 SQLite machine state only when the completion marker is the sole required change.
