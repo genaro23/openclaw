@@ -262,6 +262,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
       return createSessionRowProjection({ cfg: getRuntimeConfig(), getConfig: getRuntimeConfig });
     })();
     this.ready = this.sessionProjection.then(() => {});
+    void this.ready.catch(() => {});
     this.unbindSessionProjection = bindEmbeddedSessionRowProjection(this.sessionProjection);
     queueMicrotask(() => {
       this.onConnected?.();

@@ -1518,13 +1518,18 @@ describe("EmbeddedTuiBackend", () => {
   });
 
   it("reports publication failure instead of returning stale model choices", async () => {
+    const publishing = deferred<void>();
     const publication = deferred<void>();
-    refreshPreparedModelRuntimeSnapshotsMock.mockReturnValueOnce(publication.promise);
+    refreshPreparedModelRuntimeSnapshotsMock.mockImplementationOnce(() => {
+      publishing.resolve();
+      return publication.promise;
+    });
     const backend = new EmbeddedTuiBackend();
     backend.start();
     const choices = backend.listModels({ agentId: "work" });
     const failure = expect(choices).rejects.toThrow("catalog publication failed");
 
+    await publishing.promise;
     publication.reject(new Error("catalog publication failed"));
     await failure;
     expect(withPreparedModelCatalogOwnerMock).not.toHaveBeenCalled();
