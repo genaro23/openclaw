@@ -119,7 +119,7 @@ describe("doctor config persistence", () => {
     "publishes Teams webhook completion after included settings (%s)",
     async (scenario) => {
       await withDoctorConfigPreflightHome(async (home) => {
-        await withEnvAsync({ OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" }, async () => {
+        await withEnvAsync({ OPENCLAW_DISABLE_BUNDLED_PLUGINS: undefined }, async () => {
           const configPath = await writeOpenClawConfig(home, {
             agents: { entries: { main: {} } },
             channels: { msteams: { $include: "./teams.json" } },
@@ -198,6 +198,7 @@ describe("doctor config persistence", () => {
             browser: { $include: "./browser.json" },
             gateway: { mode: "local" },
             plugins: { enabled: false },
+            meta: { migrations: { webhookListeners: true } },
           });
           const includePath = path.join(path.dirname(configPath), "browser.json");
           const includeRaw = JSON.stringify({
@@ -284,6 +285,7 @@ describe("doctor config persistence", () => {
             agents: { $include: "./agents.json5" },
             gateway: { mode: "local" },
             plugins: { enabled: false },
+            meta: { migrations: { webhookListeners: true } },
           });
           const dir = path.dirname(configPath);
           const defaults = { models: { "openai/gpt-5.5": { alias: "Config Lab" } } };
@@ -417,6 +419,7 @@ describe("doctor config persistence", () => {
             agents: { entries: { main: { $include: "./config/main-parent.json5" } } },
             gateway: { mode: "local" },
             plugins: { enabled: false },
+            meta: { migrations: { webhookListeners: true } },
           });
           const fragmentDir = path.join(path.dirname(configPath), "config");
           await fs.mkdir(fragmentDir);
