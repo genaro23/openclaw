@@ -179,41 +179,52 @@ export class CodexToolTranscriptProjection {
   }
 
   recordNativeToolCall(item: CodexThreadItem | undefined): void {
-    if (!item || !isProjectedNativeToolItem(item)) {
-      return;
-    }
-    const name = itemName(item);
-    if (name) {
-      this.recordToolCall({ id: item.id, name, arguments: itemToolArgs(item) });
+    if (item) {
+      const call = this.nativeTranscriptCall(item);
+      if (call) {
+        this.recordToolCall(call);
+      }
     }
   }
 
   recordNativeToolResult(item: CodexThreadItem | undefined, details?: unknown): void {
-    if (!item || !isProjectedNativeToolItem(item) || this.resultIds.has(item.id)) {
+    if (!item || this.resultIds.has(item.id)) {
       return;
     }
-    const name = itemName(item);
-    if (name) {
-      const status = itemStatus(item);
-      const approvalTimeoutExplanation = this.progress.approvalTimeoutExplanation(item.id, status);
-      this.recordToolResult({
-        id: item.id,
-        name,
-        text:
-          approvalTimeoutExplanation ??
-          this.rawNativeToolOutputByCallId.get(item.id) ??
-          itemTranscriptResultText(item, this.progress.outputTextByItem),
-        isError: isNonSuccessItemStatus(status),
-        ...(item.type === "commandExecution" &&
-        item.aggregatedOutput == null &&
-        this.progress.isOutputTruncated(item.id)
-          ? { captureTruncated: true }
-          : {}),
-        details,
-        ...(item.type === "webSearch" ? { resultContentSource: "network" } : {}),
-      });
-      this.progress.approvalTimeoutKinds.delete(item.id);
+    const call = this.nativeTranscriptCall(item);
+    if (!call) {
+      return;
     }
+    const name = call.name;
+    const status = itemStatus(item);
+    const approvalTimeoutExplanation = this.progress.approvalTimeoutExplanation(item.id, status);
+    this.recordToolResult({
+      id: item.id,
+      name,
+      text:
+        approvalTimeoutExplanation ??
+        this.rawNativeToolOutputByCallId.get(item.id) ??
+        itemTranscriptResultText(item, this.progress.outputTextByItem),
+      isError: isNonSuccessItemStatus(status),
+      ...(item.type === "commandExecution" &&
+      item.aggregatedOutput == null &&
+      this.progress.isOutputTruncated(item.id)
+        ? { captureTruncated: true }
+        : {}),
+      details,
+      ...(item.type === "webSearch" ? { resultContentSource: "network" } : {}),
+    });
+    this.progress.approvalTimeoutKinds.delete(item.id);
+  }
+
+  private nativeTranscriptCall(item: CodexThreadItem): ToolTranscriptCallInput | undefined {
+    if (item.type === "collabAgentToolCall" || item.type === "subAgentActivity") {
+      return this.rawCallsById.get(item.id);
+    }
+    const name = itemName(item);
+    return isProjectedNativeToolItem(item) && name
+      ? { id: item.id, name, arguments: itemToolArgs(item) }
+      : undefined;
   }
 
   recordRawNativeToolItem(item: JsonObject): void {
@@ -297,7 +308,10 @@ export class CodexToolTranscriptProjection {
       typeof item.output === "string"
         ? item.output
         : collectDynamicToolContentText(item.output as CodexThreadItem["contentItems"]);
-    const execution = rawCall?.name === "exec" ? CODE_MODE_RESULT_RE.exec(responseText) : null;
+    const execution =
+      rawCall?.name === "exec" || rawCall?.name === "wait"
+        ? CODE_MODE_RESULT_RE.exec(responseText)
+        : null;
     const codeModePatchInput = this.codeModeNativePatchInputsByCallId.get(callId);
     if (codeModePatchInput) {
       this.codeModeNativePatchInputsByCallId.delete(callId);
