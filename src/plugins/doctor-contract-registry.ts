@@ -4,6 +4,7 @@ import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
 import { shouldIncludeChannelSetupFeatureForConfig } from "../channels/plugins/bundled-setup-policy.js";
+import { applyHistoricalWebhookPins } from "../commands/doctor/shared/legacy-webhook-pins.js";
 import { GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA } from "../config/bundled-channel-config-metadata.generated.js";
 import { discoverConfigWidePluginManifestRegistry } from "../config/io.plugin-metadata.js";
 import type { LegacyConfigRule } from "../config/legacy.shared.js";
@@ -23,6 +24,7 @@ import { applyPluginDoctorCompatibilitySequence } from "./doctor-compatibility-m
 import { resolvePluginDoctorContractArtifact } from "./doctor-contract-artifact.js";
 import {
   coercePluginDoctorContractModule,
+  type PluginDoctorCompatibilityNormalizer,
   type PluginDoctorContractModule,
   type PluginDoctorStateMigrationEntry,
 } from "./doctor-contract-module.js";
@@ -81,6 +83,7 @@ type PluginDoctorContractEntry = Omit<
   "summary"
 > & {
   pluginId: string;
+  origin?: PluginManifestRegistryRecord["origin"];
 };
 
 function isTrustedForDurableStores(record: PluginManifestRegistryRecord): boolean {
@@ -96,6 +99,8 @@ type PluginDoctorRegistryParams = {
   pluginIds?: readonly string[];
   /** Candidate generation prepared by the install owner before publication. */
   manifestRegistry?: PluginManifestRegistry;
+  historicalWebhookListeners?: boolean;
+  startup?: boolean;
 };
 
 function loadPluginDoctorContractModule(modulePath: string): PluginDoctorContractModule {
@@ -170,20 +175,19 @@ function loadPluginDoctorContractEntry(
   if (!contractArtifact) {
     return null;
   }
-  let mod: PluginDoctorContractModule;
   try {
-    mod = loadPluginDoctorContractModule(contractArtifact.modulePath);
+    const mod = loadPluginDoctorContractModule(contractArtifact.modulePath);
+    const { summary, ...contract } = coercePluginDoctorContractModule(mod, record.channels);
+    if (!Object.values(summary).some(Boolean) && surface !== "stateMigrations") {
+      return null;
+    }
+    return { pluginId: record.id, ...contract, origin: record.origin };
   } catch (error) {
     log.warn(
       `failed to load doctor contract for ${record.id} from ${contractArtifact.modulePath}: ${formatErrorMessage(error)}`,
     );
     return null;
   }
-  const { summary, ...contract } = coercePluginDoctorContractModule(mod);
-  if (!Object.values(summary).some(Boolean) && surface !== "stateMigrations") {
-    return null;
-  }
-  return { pluginId: record.id, ...contract };
 }
 
 function resolvePluginDoctorManifestRecords(
@@ -252,7 +256,8 @@ function resolvePluginDoctorContracts(
   for (const { channelId, pluginId } of GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA) {
     if (
       deferredPluginMigrations.getStore()?.has(pluginId) ||
-      (!Object.hasOwn(params.config?.channels ?? {}, channelId) &&
+      (!params.historicalWebhookListeners &&
+        !Object.hasOwn(params.config?.channels ?? {}, channelId) &&
         !Object.hasOwn(params.config?.plugins?.entries ?? {}, pluginId)) ||
       ownedChannels.has(channelId) ||
       installedPluginIds.has(pluginId) ||
@@ -274,8 +279,8 @@ function resolvePluginDoctorContracts(
     if (!mod) {
       continue;
     }
-    const { summary: _summary, ...contract } = coercePluginDoctorContractModule(mod);
-    entries.push({ pluginId, ...contract });
+    const { summary: _summary, ...contract } = coercePluginDoctorContractModule(mod, [channelId]);
+    entries.push({ pluginId, ...contract, origin: "bundled" });
   }
   return entries;
 }
@@ -716,26 +721,35 @@ export function applyPluginDoctorCompatibilityMigrations(
   params?: PluginDoctorRegistryParams & {
     onInspectedPlugin?: (pluginId: string, hasConfigRepair: boolean) => void;
   },
-): {
-  config: OpenClawConfig;
-  changes: string[];
-  warnings?: string[];
-} {
-  const entries = resolvePluginDoctorContracts({
-    ...params,
-    config: params?.config ?? cfg,
-    surface: "configRepair",
-  });
-  return applyPluginDoctorCompatibilitySequence(
-    cfg,
-    entries.map((entry) => {
+): ReturnType<typeof applyPluginDoctorCompatibilitySequence> {
+  const initialized = params?.historicalWebhookListeners
+    ? applyHistoricalWebhookPins({ config: cfg, changes: [] }, undefined, params)
+    : { config: cfg, changes: [] };
+  const result = applyPluginDoctorCompatibilitySequence(
+    initialized.config,
+    resolvePluginDoctorContracts({
+      ...params,
+      config: params?.config ?? cfg,
+      surface: "configRepair",
+    }).map((entry) => {
       params?.onInspectedPlugin?.(
         entry.pluginId,
         entry.rules.length > 0 || Boolean(entry.normalizeCompatibilityConfig),
       );
-      return entry;
+      return {
+        ...entry,
+        transform: params?.historicalWebhookListeners
+          ? (mutation: ReturnType<PluginDoctorCompatibilityNormalizer>) =>
+              applyHistoricalWebhookPins(mutation, entry.historicalWebhookListener, {
+                ...params,
+                pluginId: entry.pluginId,
+                origin: entry.origin,
+              })
+          : undefined,
+      };
     }),
   );
+  return { ...result, changes: [...initialized.changes, ...result.changes] };
 }
 
 /** Inspect plugin-owned migration paths before the updater captures its recovery set. */

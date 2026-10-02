@@ -23,6 +23,34 @@ afterEach(() => {
   closeOpenClawStateDatabaseForTest();
 });
 
+it("preserves retired authored plugin receipts before webhook startup writes", async () => {
+  await withDoctorConfigPreflightHome(async (home) => {
+    await withEnvAsync(
+      { OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1", OPENCLAW_CONFIG_READONLY: undefined },
+      async () => {
+        const configPath = path.join(home, ".openclaw", "openclaw.json");
+        const original = JSON.stringify({
+          gateway: { mode: "local" },
+          plugins: {
+            enabled: false,
+            installs: { fixture: { source: "npm", spec: "fixture@1.0.0" } },
+          },
+        });
+        const backup = '{"gateway":{"mode":"local"}}\n';
+        await fs.mkdir(path.dirname(configPath), { recursive: true });
+        await fs.writeFile(configPath, original);
+        await fs.writeFile(`${configPath}.bak`, backup);
+
+        await expect(runStartupConfigPreflight({ gateway: true, observe: false })).rejects.toThrow(
+          /plugins\.installs.*Install OpenClaw 2026\.9\.5/s,
+        );
+        expect(await fs.readFile(configPath, "utf8")).toBe(original);
+        expect(await fs.readFile(`${configPath}.bak`, "utf8")).toBe(backup);
+      },
+    );
+  });
+});
+
 it.each([
   ["localhost", "loopback"],
   ["0.0.0.0", "lan"],

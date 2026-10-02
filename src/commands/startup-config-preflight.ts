@@ -91,6 +91,55 @@ async function prepareStartupConfig(
   if (!read.snapshot.valid) {
     return result(read);
   }
+  const { HISTORICAL_WEBHOOK_CHANNELS, recordReadOnlyWebhookCompletion } =
+    await import("./doctor/shared/legacy-webhook-pins.js");
+  const webhookCompletion = read.snapshot.sourceConfig.meta?.migrations?.webhookListeners;
+  if (
+    webhookCompletion !== true &&
+    !HISTORICAL_WEBHOOK_CHANNELS.every((id) => Object.hasOwn(webhookCompletion ?? {}, id))
+  ) {
+    const { applyPluginDoctorCompatibilityMigrations } =
+      await import("../plugins/doctor-contract-registry.js");
+    const { findRetiredConfigUpgradeRequirement } =
+      await import("./doctor/shared/retired-config-formats.js");
+    const migrate = (config: OpenClawConfig) => {
+      const migration = applyPluginDoctorCompatibilityMigrations(config, {
+        config,
+        env,
+        pluginIds: HISTORICAL_WEBHOOK_CHANNELS,
+        historicalWebhookListeners: true,
+        startup: true,
+      });
+      if (migration.warnings?.length) {
+        throw new Error(migration.warnings.join("\n"));
+      }
+      return migration;
+    };
+    const migration = migrate(read.snapshot.sourceConfig);
+    if (migration.changes.length) {
+      await beforeStatePreparation(read.snapshot);
+      assertPreflightConfigUnchanged(read.snapshot, (await readSnapshot()).snapshot);
+      if (!recordReadOnlyWebhookCompletion(read.snapshot.sourceConfig, migration, env)) {
+        const { transformConfigFile } = await import("../config/mutate.js");
+        await transformConfigFile({
+          base: "source",
+          baseHash: read.snapshot.hash ?? undefined,
+          writeOptions: { auditOrigin: "doctor" },
+          afterWrite: { mode: "none", reason: "startup config migration" },
+          transform: (config, { snapshot }) => {
+            const retired = findRetiredConfigUpgradeRequirement(
+              snapshot.sourceConfigBeforeMigrations ?? snapshot.sourceConfig,
+            );
+            if (retired) {
+              throw new Error(`${retired.message} ${retired.nextAction}`);
+            }
+            return { nextConfig: migrate(config).config };
+          },
+        });
+        read = await readAdmitted();
+      }
+    }
+  }
   if (options.observe !== false) {
     await cleanupStartupPluginSourceCaptures(env);
   }

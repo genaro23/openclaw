@@ -14,7 +14,14 @@ export function createLegacyWebhookListenerDoctorContract(params: {
   hostKey?: string | null;
   webhookKey?: string;
   defaultHost?: string;
+  preserveAuthoredActivation?: true;
 }): {
+  historicalWebhookListener: {
+    channelId: string;
+    port: number;
+    host?: string;
+    preserveAuthoredActivation?: true;
+  };
   legacyConfigRules: ChannelDoctorLegacyConfigRule[];
   normalizeCompatibilityConfig: (params: { cfg: OpenClawConfig }) => ChannelDoctorConfigMutation;
 } {
@@ -32,6 +39,12 @@ export function createLegacyWebhookListenerDoctorContract(params: {
   };
   const prefix = `channels.${params.channelKey}`;
   return {
+    historicalWebhookListener: {
+      channelId: params.channelKey,
+      port: params.defaultPort,
+      preserveAuthoredActivation: params.preserveAuthoredActivation,
+      ...(params.defaultHost === undefined ? {} : { host: params.defaultHost }),
+    },
     legacyConfigRules: [
       {
         path: ["channels", params.channelKey],
