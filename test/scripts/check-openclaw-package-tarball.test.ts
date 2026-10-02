@@ -13,6 +13,7 @@ import {
   PACKAGE_LIFECYCLE_PENDING_RELATIVE_PATH,
 } from "../../scripts/lib/package-lifecycle-marker.mjs";
 import { WORKSPACE_TEMPLATE_PACK_PATHS } from "../../scripts/lib/workspace-bootstrap-smoke.mts";
+import { resolveTestNodeExecPath } from "../../src/test-utils/node-process.js";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 import {
   CODE_MODE_WORKER_PATH,
@@ -204,7 +205,7 @@ describe("check-openclaw-package-tarball", () => {
       ["dist/index.js"],
       { "dist/index.js": "export {};\n" },
       (tarball) => {
-        const result = spawnSync(process.execPath, [resolve(CHECK_SCRIPT), tarball], {
+        const result = spawnSync(resolveTestNodeExecPath(), [resolve(CHECK_SCRIPT), tarball], {
           encoding: "utf8",
         });
 
