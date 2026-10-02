@@ -457,7 +457,7 @@ async function enforceSessionHistoryMaintenanceForDatabase(
     if (usage.totalBytes <= highWaterBytes) {
       break;
     }
-    const eviction = await runExclusiveSessionLifecycleMutation({
+    const eviction = await runExclusiveSessionLifecycleMutation("history-evict", {
       scope: params.storePath,
       identities: [sessionId],
       run: async () => {
@@ -599,7 +599,7 @@ async function enforceSessionHistoryMaintenanceForDatabase(
         if (usage.totalBytes <= highWaterBytes) {
           break;
         }
-        const deletion = await runExclusiveSessionLifecycleMutation({
+        const deletion = await runExclusiveSessionLifecycleMutation("archived-delete", {
           scope: params.storePath,
           identities: [candidate.sessionKey, candidate.entry.sessionId],
           run: async () =>
