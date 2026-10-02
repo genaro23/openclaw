@@ -115,7 +115,7 @@ async function prepareStartupConfig(
   };
   const assertLeaseCurrent = () => {
     assertHeartbeatCurrent();
-    lease?.heartbeat();
+    lease?.assertOwned();
   };
   try {
     if (read.recovery || needsRefreshedPluginIndexPersistence(read)) {
