@@ -15,7 +15,8 @@ import type {
 } from "openclaw/plugin-sdk/config-contracts";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import type { ChannelReplayClaimHandle } from "openclaw/plugin-sdk/persistent-dedupe";
-import { danger, warn } from "openclaw/plugin-sdk/runtime-env";
+import { danger, logVerbose, warn } from "openclaw/plugin-sdk/runtime-env";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
 import type { NormalizedAllowFrom } from "./bot-access.js";
 import {
@@ -36,7 +37,11 @@ import type {
   TelegramChannelIngressResolver,
 } from "./bot-message-context.types.js";
 import type { TelegramSpooledReplayDeferredParticipant } from "./bot-processing-outcome.js";
-import { MEDIA_GROUP_TIMEOUT_MS, type MediaGroupEntry } from "./bot-updates.js";
+import {
+  MEDIA_GROUP_MAX_HOLD_MS,
+  MEDIA_GROUP_TIMEOUT_MS,
+  type MediaGroupEntry,
+} from "./bot-updates.js";
 import { resolveMedia } from "./bot/delivery.resolve-media.js";
 import {
   buildTelegramGroupPeerId,
@@ -78,6 +83,8 @@ type TelegramMediaGroupInput = MediaAuthorization & {
 type BufferedMediaGroupEntry = MediaGroupEntry &
   Omit<TelegramMediaGroupInput, "ctx" | "msg"> & {
     spooledReplayParticipants: TelegramSpooledReplayDeferredParticipant[];
+    revision: number;
+    holdDeadlineMs: number;
   };
 
 type TelegramGroupMediaDisposition = "process" | "skip" | "silent-ingest";
@@ -459,6 +466,53 @@ export function createTelegramInboundMedia({
       await processMediaGroup(entry).catch(() => undefined);
     });
 
+  const settleMediaGroup = (key: string, entry: BufferedMediaGroupEntry): void | Promise<void> => {
+    if (buffer.get(key) !== entry) {
+      return;
+    }
+    const flush = () => {
+      buffer.delete(key);
+      queueEntry(key, entry);
+    };
+    const participant = entry.spooledReplayParticipants.at(-1);
+    if (performance.now() >= entry.holdDeadlineMs || !participant) {
+      flush();
+      return;
+    }
+    const revision = entry.revision;
+    const settle = (hold: boolean) => {
+      // A member that joined during the read already owns a fresh quiet timer.
+      if (buffer.get(key) !== entry || entry.revision !== revision) {
+        return;
+      }
+      if (hold && performance.now() < entry.holdDeadlineMs) {
+        entry.timer = setTimeout(() => {
+          void settleMediaGroup(key, entry);
+        }, timeoutMs);
+      } else {
+        flush();
+      }
+    };
+    return participant.readLaneBacklogUpdates().then(
+      (updates) =>
+        settle(
+          updates.some((update) => {
+            const msg = isRecord(update) ? (update.message ?? update.channel_post) : undefined;
+            return (
+              isRecord(msg) &&
+              msg.media_group_id === entry.messages[0]?.msg.media_group_id &&
+              isRecord(msg.chat) &&
+              msg.chat.id === entry.chatId
+            );
+          }),
+        ),
+      (error: unknown) => {
+        logVerbose(`telegram: media group backlog read failed: ${String(error)}`);
+        settle(false);
+      },
+    );
+  };
+
   const handleMediaGroup = (input: TelegramMediaGroupInput): boolean => {
     const mediaGroupId = input.msg.media_group_id;
     if (!mediaGroupId) {
@@ -475,6 +529,7 @@ export function createTelegramInboundMedia({
       }
       clearTimeout(existing.timer);
       existing.messages.push({ msg: input.msg, ctx: input.ctx });
+      existing.revision += 1;
       existing.promptContextMinTimestampMs = latestPromptContextMinTimestampMs(
         existing.promptContextMinTimestampMs,
         input.promptContextMinTimestampMs,
@@ -493,8 +548,7 @@ export function createTelegramInboundMedia({
         ...input.channelIngressResolvers,
       ];
       existing.timer = setTimeout(() => {
-        buffer.delete(key);
-        queueEntry(key, existing);
+        void settleMediaGroup(key, existing);
       }, timeoutMs);
       return true;
     }
@@ -502,13 +556,14 @@ export function createTelegramInboundMedia({
       ...input,
       messages: [{ msg: input.msg, ctx: input.ctx }],
       spooledReplayParticipants: participant ? [participant] : [],
+      revision: 0,
+      holdDeadlineMs: performance.now() + MEDIA_GROUP_MAX_HOLD_MS,
       ...promptContextBoundaryOptions(
         input.promptContextMinTimestampMs,
         input.promptContextAmbientWatermark,
       ),
       timer: setTimeout(() => {
-        buffer.delete(key);
-        queueEntry(key, entry);
+        void settleMediaGroup(key, entry);
       }, timeoutMs),
     };
     buffer.set(key, entry);

@@ -172,6 +172,26 @@ function holdForwardWindow() {
   };
 }
 
+function flushHeldQuietWindow(
+  timers: ReturnType<typeof holdTelegramMediaTimeouts>,
+  delayMs: number,
+) {
+  const flush = resolveFlushTimerForDelay(timers, delayMs);
+  if (!flush) {
+    throw new Error(`Expected the buffered update's ${delayMs} ms quiet timer`);
+  }
+  flush();
+}
+
+function captureNextDownstreamTurn() {
+  const dispatched = createDeferred<MsgContext>();
+  downstreamTurns.mockImplementationOnce(async (turn) => {
+    dispatched.resolve(turn);
+    return { queuedFinal: false, counts: { block: 0, final: 0, tool: 0 } };
+  });
+  return dispatched.promise;
+}
+
 /** Both members must land in one turn; a second turn is the split this file guards. */
 async function awaitSingleDownstreamTurn(): Promise<MsgContext & Record<string, unknown>> {
   await vi.waitFor(
@@ -365,6 +385,118 @@ describe("Telegram durable ingress coalescing", () => {
       albumTimers.mockRestore();
       await monitor.stop();
       await telegramTransport.close();
+    }
+  });
+
+  it.each([
+    {
+      buffer: "album",
+      delayMs: 40,
+      first: photoUpdate({ updateId: 1_101, messageId: 1, caption: "Buffered context" }),
+      second: photoUpdate({ updateId: 1_102, messageId: 2 }),
+      media: [
+        { path: "/tmp/photo-1.jpg", kind: "image" },
+        { path: "/tmp/photo-2.jpg", kind: "image" },
+      ],
+    },
+    {
+      buffer: "forward",
+      delayMs: 1_000,
+      first: forwardedTextUpdate({ updateId: 1_201, messageId: 1, text: "Buffered context" }),
+      second: forwardedPhotoUpdate({ updateId: 1_202, messageId: 2 }),
+      media: [{ path: "/tmp/photo-1.jpg", kind: "image" }],
+    },
+  ])("holds the $buffer quiet flush while the next member is durably pending", async (testCase) => {
+    const { monitor } = await createMonitor();
+    vi.useFakeTimers({ toFake: ["performance"] });
+    const quietTimers = holdTelegramMediaTimeouts(testCase.delayMs);
+    const dispatched = captureNextDownstreamTurn();
+    const queue = openTelegramIngressQueue({ stateDir });
+    try {
+      monitor.start();
+      await monitor.admit(testCase.first);
+      await monitor.waitForIdle();
+      await monitor.pause();
+
+      // Pause the pump, not durable admission: the next member has not reached the buffer.
+      await writeTelegramSpooledUpdate({ stateDir, update: testCase.second });
+      expect(await queue.listPending({ limit: "all" })).toMatchObject([
+        { id: telegramQueueEventId(testCase.second.update_id) },
+      ]);
+      const held = createDeferred<void>();
+      const scheduleHeldTimer = quietTimers.getMockImplementation();
+      if (!scheduleHeldTimer) {
+        throw new Error("Expected the held quiet-timer implementation");
+      }
+      quietTimers.mockImplementation((callback, delay, ...args) => {
+        const timer = scheduleHeldTimer(callback, delay, ...args);
+        if (delay === testCase.delayMs) {
+          held.resolve();
+        }
+        return timer;
+      });
+      flushHeldQuietWindow(quietTimers, testCase.delayMs);
+      expect(
+        await Promise.race([held.promise.then(() => "held"), dispatched.then(() => "dispatched")]),
+      ).toBe("held");
+      quietTimers.mockImplementation(scheduleHeldTimer);
+      expect(downstreamTurns).not.toHaveBeenCalled();
+
+      monitor.start();
+      await monitor.waitForIdle();
+      flushHeldQuietWindow(quietTimers, testCase.delayMs);
+      const turn = await dispatched;
+      await monitor.waitForDeferredClaims();
+      expect(downstreamTurns).toHaveBeenCalledOnce();
+      expect(turn.Body).toContain("Buffered context");
+      expect(turn).toMatchObject({ media: testCase.media });
+      await assertSpoolTombstoned({
+        stateDir,
+        updateIds: [testCase.first.update_id, testCase.second.update_id],
+      });
+    } finally {
+      quietTimers.mockRestore();
+    }
+  });
+
+  it("flushes an album while unrelated plain text is durably pending on the same lane", async () => {
+    const { monitor } = await createMonitor();
+    vi.useFakeTimers({ toFake: ["performance"] });
+    const albumTimers = holdTelegramMediaTimeouts(40);
+    const dispatched = captureNextDownstreamTurn();
+    const queue = openTelegramIngressQueue({ stateDir });
+    try {
+      monitor.start();
+      await monitor.admit(
+        photoUpdate({ updateId: 1_301, messageId: 1, caption: "Single photo album" }),
+      );
+      await monitor.waitForIdle();
+      await monitor.pause();
+      await writeTelegramSpooledUpdate({
+        stateDir,
+        update: textUpdate({ updateId: 1_302, messageId: 2, text: "Unrelated plain text" }),
+      });
+      expect(await queue.listPending({ limit: "all" })).toMatchObject([
+        { id: telegramQueueEventId(1_302) },
+      ]);
+
+      flushHeldQuietWindow(albumTimers, 40);
+      const turn = await dispatched;
+      await monitor.waitForDeferredClaims();
+      expect(downstreamTurns).toHaveBeenCalledOnce();
+      expect(turn.Body).toContain("Single photo album");
+      expect(turn).toMatchObject({ media: [{ path: "/tmp/photo-1.jpg", kind: "image" }] });
+      expect(await queue.listPending({ limit: "all" })).toMatchObject([
+        { id: telegramQueueEventId(1_302) },
+      ]);
+
+      monitor.start();
+      await monitor.waitForIdle();
+      expect(downstreamTurns).toHaveBeenCalledTimes(2);
+      expect(downstreamTurns.mock.calls[1]?.[0].Body).toContain("Unrelated plain text");
+      await assertSpoolTombstoned({ stateDir, updateIds: [1_301, 1_302] });
+    } finally {
+      albumTimers.mockRestore();
     }
   });
 

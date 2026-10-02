@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ChannelIngressMonitorLifecycle } from "openclaw/plugin-sdk/channel-outbound";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export type TelegramMessageProcessingResult =
   | { kind: "completed" }
@@ -27,6 +28,7 @@ export type TelegramSpooledReplayDeferredParticipant = {
   key: string;
   abortSignal: AbortSignal;
   task: Promise<TelegramMessageProcessingResult>;
+  readLaneBacklogUpdates: () => Promise<readonly unknown[]>;
   isSettled: () => boolean;
   wasOwnerAbortedWhilePending: () => boolean;
   /** Defers external timeout settlement while durable adoption decides ownership. */
@@ -88,7 +90,8 @@ export function createTelegramSpooledReplayParticipant(
   key: string,
 ): TelegramSpooledReplayDeferredParticipant {
   const abortController = new AbortController();
-  const ownerAbortSignal = telegramSpooledReplayFrames.getStore()?.lifecycle?.abortSignal;
+  const lifecycle = telegramSpooledReplayFrames.getStore()?.lifecycle;
+  const ownerAbortSignal = lifecycle?.abortSignal;
   const abortSignal = ownerAbortSignal
     ? AbortSignal.any([abortController.signal, ownerAbortSignal])
     : abortController.signal;
@@ -133,6 +136,12 @@ export function createTelegramSpooledReplayParticipant(
     // claim owner's pre-adoption cancellation boundary.
     abortSignal,
     task,
+    readLaneBacklogUpdates: async () => {
+      const rows = (await lifecycle?.readLaneBacklog?.()) ?? [];
+      return rows.flatMap(({ payload }) =>
+        isRecord(payload) && "update" in payload ? [payload.update] : [],
+      );
+    },
     isSettled: () => settled,
     wasOwnerAbortedWhilePending: () => ownerAbortedWhilePending,
     beginSettlementHold: () => {

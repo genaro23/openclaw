@@ -6,6 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   holdTelegramMediaTimeouts,
   flushChannelPostMediaGroup,
+  resolveFlushTimerForDelay,
   withTelegramGetFileRetryClock,
 } from "./bot-media-timers.test-support.js";
 import {
@@ -648,8 +649,15 @@ describe("createTelegramBot channel_post media", () => {
         }),
       );
       expect(runs.map(({ deferredWork }) => Boolean(deferredWork))).toEqual([true, true]);
-      // Replay participant processing already uses the overall test timeout.
-      await flushChannelPostMediaGroup(setTimeoutSpy, 0);
+      const flush = resolveFlushTimerForDelay(
+        setTimeoutSpy,
+        TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
+      );
+      if (!flush) {
+        throw new Error("Expected the spooled album's quiet timer");
+      }
+      flush();
+      // Backlog inspection can defer queue admission; participants own the retry outcome.
       expect(await Promise.all(runs.map(({ deferredWork }) => deferredWork!.task))).toEqual([
         { kind: "failed-retryable", error: expect.any(MediaFetchError) },
         { kind: "failed-retryable", error: expect.any(MediaFetchError) },
