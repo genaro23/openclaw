@@ -20,19 +20,14 @@ import {
 } from "./chat-history-budget.js";
 import {
   capChatHistoryAroundMessage,
-  enrichChatHistoryCompactionMarkers,
   resolveChatHistoryNextOffset,
 } from "./chat-history-page-kernel.js";
 
 export function prepareChatHistoryResponsePage(
   historyPage: ChatHistoryPage,
-  {
-    entry: historyEntry,
-    maxHistoryBytes,
-    messageId,
-  }: Pick<ChatHistoryPageParams, "entry" | "maxHistoryBytes" | "messageId">,
+  { maxHistoryBytes, messageId }: Pick<ChatHistoryPageParams, "maxHistoryBytes" | "messageId">,
 ): ChatHistoryResponsePage {
-  const normalized = enrichChatHistoryCompactionMarkers(historyPage.messages, historyEntry);
+  const normalized = historyPage.messages;
   // Imported snapshots have no back-scroll cursor. Preserve their complete
   // snapshot budget until the external history owner supports pagination.
   const responseHistoryBytes = historyPage.completeCliImport

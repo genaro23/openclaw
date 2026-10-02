@@ -1,5 +1,3 @@
-import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
-import { readLegacyCompactionHistory } from "../../config/sessions/legacy-compaction-history.js";
 import type {
   ChatHistoryPage,
   ChatHistoryPageParams,
@@ -92,56 +90,6 @@ function resolveChatHistoryActiveLeafEntryId(
     return readPage.activeLeafEntryId ?? null;
   }
   return resolveSessionTranscriptActiveLeafEntryId(readPage.transcriptEvents ?? []) ?? null;
-}
-
-/** Preserve token metrics saved by pre-removal builds; new markers own their metrics. */
-export function enrichChatHistoryCompactionMarkers(
-  messages: unknown[],
-  entry: ChatHistoryPageParams["entry"],
-): unknown[] {
-  let checkpoints: ReturnType<typeof readLegacyCompactionHistory>;
-  try {
-    checkpoints = readLegacyCompactionHistory(entry);
-  } catch {
-    // Corrupt legacy metadata cannot hide readable transcript history.
-    return messages;
-  }
-  if (checkpoints.length === 0) {
-    return messages;
-  }
-  const checkpointByEntryId = new Map(
-    checkpoints.flatMap((checkpoint) => {
-      const entryId = checkpoint.postCompaction.entryId;
-      return entryId ? [[entryId, checkpoint] as const] : [];
-    }),
-  );
-  let changed = false;
-  const enriched = messages.map((message) => {
-    const record = asOptionalRecord(message);
-    const metadata = asOptionalRecord(record?.["__openclaw"]);
-    if (metadata?.kind !== "compaction" || typeof metadata.id !== "string") {
-      return message;
-    }
-    const checkpoint = checkpointByEntryId.get(metadata.id);
-    if (!checkpoint) {
-      return message;
-    }
-    const tokensBefore = checkpoint.tokensBefore;
-    const tokensAfter = checkpoint.tokensAfter;
-    if (tokensBefore === undefined && tokensAfter === undefined) {
-      return message;
-    }
-    changed = true;
-    return {
-      ...record,
-      __openclaw: {
-        ...metadata,
-        ...(tokensBefore !== undefined ? { tokensBefore } : {}),
-        ...(tokensAfter !== undefined ? { tokensAfter } : {}),
-      },
-    };
-  });
-  return changed ? enriched : messages;
 }
 
 function resolveChatHistoryMessageGroup(

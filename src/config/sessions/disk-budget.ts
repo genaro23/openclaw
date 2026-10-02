@@ -7,6 +7,7 @@ import {
   normalizeOptionalLowercaseString,
 } from "@openclaw/normalization-core/string-coerce";
 import { resolveRealpathOrAbsolute as canonicalizePathForComparison } from "../../infra/boundary-path.js";
+import { isPathStrictlyInside } from "../../infra/path-guards.js";
 import {
   resolveTrajectoryFilePath,
   resolveTrajectoryPointerFilePath,
@@ -35,14 +36,13 @@ import type {
   SessionDiskBudgetSweepResult,
   SessionUnreferencedArtifactSweepResult,
 } from "./disk-budget.types.js";
-import { readLegacyCompactionSnapshotPaths } from "./legacy-compaction-history.js";
 import { resolveSessionArtifactDirectory, resolveSessionFilePathCore } from "./paths.js";
 import type { SqliteSessionArchivePruningDiagnostics } from "./session-accessor.sqlite-contract.js";
 import { timeArchivePruningAsync } from "./session-history-archive-pruning-diagnostics.js";
 import type { SessionLegacyArchiveRemovalResult } from "./session-history-archive-pruning.types.js";
 import { projectSessionStoreForPersistence } from "./skill-prompt-blobs.js";
 import { isSessionEntryDiskBudgetEvictable } from "./store-maintenance.js";
-import type { SessionEntry } from "./types.js";
+import type { InternalSessionEntry as SessionEntry } from "./types.js";
 
 export { measureSessionPhysicalDiskUsage };
 export type { SessionPhysicalDiskUsage };
@@ -115,10 +115,9 @@ function resolveSessionTranscriptPathForEntry(params: {
     });
     const resolvedSessionsDir = canonicalizePathForComparison(params.sessionsDir);
     const resolvedPath = canonicalizePathForComparison(resolved);
-    const relative = path.relative(resolvedSessionsDir, resolvedPath);
     // Cleanup only owns artifacts under the sessions directory; absolute/parent escapes are
     // ignored even if a stale entry points there.
-    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    if (!isPathStrictlyInside(resolvedSessionsDir, resolvedPath)) {
       return null;
     }
     return resolvedPath;
@@ -174,11 +173,10 @@ function resolveReferencedSessionArtifactPaths(params: {
     })) {
       referenced.add(resolved);
     }
-    for (const checkpointFile of readLegacyCompactionSnapshotPaths(entry)) {
-      const resolvedCheckpointPath = canonicalizePathForComparison(checkpointFile);
-      const relative = path.relative(resolvedSessionsDir, resolvedCheckpointPath);
-      if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
-        referenced.add(resolvedCheckpointPath);
+    for (const artifactPath of entry.retainedHistoryReferences?.artifactPaths ?? []) {
+      const resolvedArtifactPath = canonicalizePathForComparison(artifactPath);
+      if (isPathStrictlyInside(resolvedSessionsDir, resolvedArtifactPath)) {
+        referenced.add(resolvedArtifactPath);
       }
     }
   }

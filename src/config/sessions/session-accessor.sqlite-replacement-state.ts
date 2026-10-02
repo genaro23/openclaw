@@ -26,7 +26,8 @@ import type {
   SessionEntryReplacementCommitted,
 } from "./session-accessor.sqlite-replacement-types.js";
 import { appendTranscriptEventsInTransaction } from "./session-accessor.sqlite-transcript-store.js";
-import type { SessionEntry } from "./types.js";
+import { mergeRetainedHistoryReferences } from "./session-retained-history.js";
+import type { InternalSessionEntry as SessionEntry } from "./types.js";
 
 /** Receipts carry only publication facts, never saved prompts or maintenance payloads. */
 export function prepareSessionEntryReplacementPublication(
@@ -147,6 +148,17 @@ export function commitSessionEntryReplacementsInDatabase(
         ...(input.consumePendingReset ? { consumePendingReset: true } : {}),
         previousEntry: selectedBefore ?? null,
         canonicalPreviousEntry: transactionEntries.get(replacement.sessionKey) ?? null,
+        retainedHistoryReferencesFromOwner: replacement.previousSessionKeys?.length
+          ? mergeRetainedHistoryReferences(
+              sourceEntries
+                .filter(
+                  ({ entry }) =>
+                    entry.sessionId === replacement.entry.sessionId &&
+                    entry.lifecycleRevision === replacement.entry.lifecycleRevision,
+                )
+                .map(({ entry }) => entry.retainedHistoryReferences),
+            )
+          : undefined,
       },
     );
     deleteLegacySessionEntryRows(
