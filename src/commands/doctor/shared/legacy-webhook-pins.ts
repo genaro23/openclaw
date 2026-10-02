@@ -4,7 +4,7 @@ import type { ChannelDoctorConfigMutation } from "../../../channels/plugins/type
 import { getConfigValueAtPath, setConfigValueAtPath } from "../../../config/config-paths.js";
 import { resolveConfigPath, resolveIsConfigReadOnly } from "../../../config/paths.js";
 import { cloneConfigWithResolutionFacts } from "../../../config/resolution-facts.js";
-import type { ConfigFileSnapshot, OpenClawConfig } from "../../../config/types.js";
+import type { ConfigFileSnapshot } from "../../../config/types.openclaw.js";
 import { isTruthyEnvValue } from "../../../infra/env.js";
 import {
   executeSqliteQueryTakeFirstSync,
