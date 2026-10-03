@@ -386,7 +386,14 @@ const send = process.send.bind(process);
 const emit = process.emit.bind(process);
 let holdRetirement = false;
 let retirement;
+let holdRelease = false;
+let releaseControl;
 process.emit = (event, message, ...args) => {
+  if (holdRelease && event === "message" && message?.type === "workspace-quiescence-control" && message.action === "release") {
+    releaseControl = () => emit(event, message, ...args);
+    send({ type: "acceptance-release-held" });
+    return true;
+  }
   if (holdRetirement && event === "message" && message?.type === "workspace-quiescence-retire") {
     retirement = () => emit(event, message, ...args);
     send({ type: "acceptance-retirement-held" });
@@ -407,6 +414,8 @@ global.setTimeout = (callback) => { deadline = callback; return { unref() {} }; 
 process.on("message", (message) => {
   if (message?.type === "acceptance-expire") { elapsed += 60_000; deadline(); }
   if (message?.type === "acceptance-renewal-release") replies.shift()?.();
+  if (message?.type === "acceptance-release-hold") holdRelease = true;
+  if (message?.type === "acceptance-release-continue") { holdRelease = false; releaseControl?.(); }
   if (message?.type === "acceptance-retirement-hold") holdRetirement = true;
   if (message?.type === "acceptance-retirement-release") { holdRetirement = false; retirement?.(); }
   if (message?.type === "acceptance-control-fence") send({ type: "acceptance-control-fenced" });
@@ -425,31 +434,50 @@ process.on("message", (message) => {
       const helper = spawned.mock.results.flatMap((result) =>
         result.type === "return" && result.value.pid === lease.watchdog.pid ? [result.value] : [],
       )[0]!;
-      const fence = async () => {
-        const fenced = once(helper, "message");
-        helper.send({ type: "acceptance-control-fence" });
-        expect((await fenced)[0]).toEqual({ type: "acceptance-control-fenced" });
-      };
-      let renewal: Promise<void> | undefined;
-      if (renewalRaces) {
+      if (!renewalRaces) {
         const held = once(helper, "message");
-        renewal = expect(f.command(renew)).rejects.toThrow("lease expired during control");
+        helper.send({ type: "acceptance-release-hold" });
+        const releasing = f.command(release);
+        expect((await held)[0]).toEqual({ type: "acceptance-release-held" });
+        const stopped = once(helper, "close");
+        const outcomes = Promise.allSettled([releasing, f.runtime.quiescence.close()]);
+        try {
+          const retired = once(helper, "message");
+          helper.send({ type: "acceptance-expire" });
+          expect((await retired)[0]).toEqual({ type: "workspace-quiescence-retired", nonce });
+          expect(await outcomes).toEqual([
+            { status: "fulfilled", value: expect.objectContaining({ code: 0 }) },
+            { status: "fulfilled", value: undefined },
+          ]);
+        } finally {
+          if (helper.connected) {
+            helper.send({ type: "acceptance-release-continue" });
+          }
+          await stopped;
+        }
+        expect(helper.exitCode).toBe(0);
+      } else {
+        const fence = async () => {
+          const fenced = once(helper, "message");
+          helper.send({ type: "acceptance-control-fence" });
+          expect((await fenced)[0]).toEqual({ type: "acceptance-control-fenced" });
+        };
+        const held = once(helper, "message");
+        const renewal = expect(f.command(renew)).rejects.toThrow("lease expired during control");
         expect((await held)[0]).toEqual({ type: "acceptance-renewal-held" });
-      }
-      const retired = once(helper, "message");
-      helper.send({ type: "acceptance-expire" });
-      expect((await retired)[0]).toEqual({ type: "workspace-quiescence-retired", nonce });
-      await renewal;
-      await f.command(release);
-      await f.command(acquire);
-      expect(f.readLease().watchdog).toEqual(lease.watchdog);
-      if (renewalRaces) {
-        const held = once(helper, "message");
+        const retired = once(helper, "message");
+        helper.send({ type: "acceptance-expire" });
+        expect((await retired)[0]).toEqual({ type: "workspace-quiescence-retired", nonce });
+        await renewal;
+        await f.command(release);
+        await f.command(acquire);
+        expect(f.readLease().watchdog).toEqual(lease.watchdog);
+        const currentHeld = once(helper, "message");
         let settled = false;
         const currentRenewal = f.command(renew).then(() => {
           settled = true;
         });
-        expect((await held)[0]).toEqual({ type: "acceptance-renewal-held" });
+        expect((await currentHeld)[0]).toEqual({ type: "acceptance-renewal-held" });
         try {
           const stale = once(helper, "message");
           helper.send({ type: "acceptance-renewal-release" });
@@ -464,6 +492,11 @@ process.on("message", (message) => {
           helper.send({ type: "acceptance-renewal-release" });
           await currentRenewal;
         }
+        const idleExpiry = once(helper, "message");
+        helper.send({ type: "acceptance-expire" });
+        expect((await idleExpiry)[0]).toEqual({ type: "workspace-quiescence-retired", nonce });
+        await f.command(acquire);
+        expect(f.readLease().watchdog).toEqual(lease.watchdog);
         const heldAgain = once(helper, "message");
         const expiring = expect(f.command(renew)).rejects.toThrow("lease expired during control");
         expect((await heldAgain)[0]).toEqual({ type: "acceptance-renewal-held" });
@@ -493,9 +526,6 @@ process.on("message", (message) => {
           await Promise.all([closing, stopped]);
         }
         expect(closed).toBe(true);
-      } else {
-        await f.command(release);
-        expect(helper.exitCode).toBeNull();
       }
       expect(f.runtime.quiescence.hasActiveWork()).toBe(false);
       expect(fs.existsSync(f.leasePath)).toBe(false);

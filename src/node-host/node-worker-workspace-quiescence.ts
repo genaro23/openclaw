@@ -324,12 +324,14 @@ export class NodeWorkerWorkspaceQuiescence {
         try {
           await this.control(lease, operation);
         } catch (error) {
-          if (!lease.exited) {
-            throw error;
+          if (!lease.released) {
+            if (!lease.exited) {
+              throw error;
+            }
+            // A dead helper cannot acknowledge recovery; the standalone owner validates
+            // and removes its empty lease without signalling any recorded PID.
+            await this.runScript(lease.context, operation);
           }
-          // A dead helper cannot acknowledge recovery; the standalone owner validates
-          // and removes its empty lease without signalling any recorded PID.
-          await this.runScript(lease.context, operation);
         }
         lease.released = true;
         this.retire(lease);
