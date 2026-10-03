@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { expect, test, vi } from "vitest";
+import { awaitGateBeforeSettlement } from "../../test/helpers/promise.js";
 import { getRegistryWorktree, listRegistryWorktrees } from "../agents/worktrees/registry.js";
 import { managedWorktrees } from "../agents/worktrees/service.js";
 import { getRuntimeConfig } from "../config/io.js";
@@ -23,7 +24,7 @@ import {
   createGitWorkspace,
 } from "./server.sessions.create.projects.test-support.js";
 import {
-  setupSessionCreateTestHarness,
+  setupSessionCreateHandlerTestHarness,
   chatSendOwner,
   requireNonEmptyString,
 } from "./server.sessions.create.test-support.js";
@@ -33,7 +34,7 @@ import { createWorkerSessionPlacementStore } from "./worker-environments/placeme
 import { seedAttachedPlacementEnvironment } from "./worker-environments/placement-test-fixtures.js";
 
 let gitWorkspaceTemplate: string;
-const { createSessionStoreDir } = setupSessionCreateTestHarness(async (makeTempDir) => {
+const { createSessionStoreDir } = setupSessionCreateHandlerTestHarness(async (makeTempDir) => {
   gitWorkspaceTemplate = await createGitWorkspace(makeTempDir("openclaw-session-git-template-"));
 });
 
@@ -224,6 +225,7 @@ test("sessions.create rejects a replaced required spawn parent before child crea
   });
   await parentMutationStarted.promise;
 
+  const lifecycleAdmission = createDeferredCore();
   const creating = createGatewaySession({
     cfg: getRuntimeConfig(),
     agentId: "main",
@@ -232,9 +234,19 @@ test("sessions.create rejects a replaced required spawn parent before child crea
     spawnDepth: 1,
     commandSource: "test",
     creation: { via: "spawn", actor: { type: "agent", id: "main" } },
+    onPhase: (phase) => {
+      if (phase === "lifecycleAdmission") {
+        lifecycleAdmission.resolve();
+      }
+    },
   });
 
   try {
+    await awaitGateBeforeSettlement(
+      lifecycleAdmission.promise,
+      creating,
+      "Session creation settled before lifecycle admission",
+    );
     replaceParent.resolve();
     await replacing;
     const created = await creating;
