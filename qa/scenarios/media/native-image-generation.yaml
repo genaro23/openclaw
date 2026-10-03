@@ -12,6 +12,7 @@ scenario:
   successCriteria:
     - image_generate appears in the effective tool inventory.
     - Agent triggers native image_generate.
+    - Live Codex proof records matching tool_search call/output discovery linked to the successful image_generate result.
     - Persisted history records exactly one successful generation action, independently of status queries.
     - Tool output returns a saved MEDIA path and the file exists.
     - The generated-media completion produces exactly one outbound channel delivery containing the saved PNG bytes.
@@ -23,6 +24,7 @@ scenario:
     - extensions/qa-lab/src/providers/mock-openai/server.ts
   execution:
     kind: flow
+    liveConfiguredRuntime: codex
     summary: Verify image_generate appears when configured and returns a real saved media artifact.
     channel: qa-channel
     config:
@@ -179,4 +181,27 @@ flow:
               && persistedReply === mediaDeliveries[0].text
             message:
               expr: "`generated image completion was not persisted to the requester session: ${JSON.stringify({ completedGenerations: completedGenerations.length, persistedReply, deliveredReply: mediaDeliveries[0].text })}`"
-      detailsExpr: "`${outbound.text}\\nIMAGE_PATH:${generatedPath}`"
+        - set: imageSearchDiscoveryDetails
+          value: tool_search discovery not required for this runtime
+        - if:
+            expr: >-
+              !env.mock
+              && String(env.primaryModel ?? '').startsWith('openai/')
+              && env.gateway.runtimeEnv?.OPENCLAW_QA_FORCE_RUNTIME !== 'openclaw'
+            then:
+              - call: requireToolSearchDiscoveryEvidence
+                saveAs: imageSearchDiscovery
+                args:
+                  - ref: env
+                  - sessionKey:
+                      ref: sessionKey
+                    toolName: image_generate
+                    expectedCallId:
+                      expr: completedGenerations[0].callId
+                    expectedSuccess: true
+              - set: imageSearchDiscoveryDetails
+                value:
+                  expr: >-
+                    `image_generate tool_search discovery
+                    ${formatToolSearchDiscoveryReceipt('happy', imageSearchDiscovery)}`
+      detailsExpr: "`${outbound.text}\\n${imageSearchDiscoveryDetails}\\nIMAGE_PATH:${generatedPath}`"

@@ -6,6 +6,7 @@ import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createQaBusState } from "./bus-state.js";
 import { waitForQaTransportCondition } from "./qa-transport.js";
+import type { requireToolSearchDiscoveryEvidence } from "./runtime-tool-search-evidence.js";
 import { readQaScenarioById } from "./scenario-catalog.js";
 import { runScenarioFlow } from "./scenario-flow-runner.js";
 import { runAgentPrompt } from "./suite-runtime-agent-process.js";
@@ -44,7 +45,12 @@ type ImageFault =
   | "failed turn";
 
 async function runImageScenario(
-  options: { progress?: boolean; fault?: ImageFault; isGenerating?: () => boolean } = {},
+  options: {
+    progress?: boolean;
+    fault?: ImageFault;
+    isGenerating?: () => boolean;
+    liveCodexDiscovery?: "present" | "missing";
+  } = {},
 ) {
   const scenario = readQaScenarioById("native-image-generation");
   if (!scenario.execution.flow) {
@@ -93,7 +99,7 @@ async function runImageScenario(
               ? ["status"]
               : options.fault === "duplicate generation"
                 ? ["generate", "generate"]
-                : ["generate", "status"];
+                : ["status", "generate", "status"];
           return {
             messages: actions.flatMap((action, index) => {
               const call = {
@@ -153,6 +159,8 @@ async function runImageScenario(
       },
     },
     transport: { buildAgentDelivery: () => ({ channel: "qa-channel", to: "dm:qa-operator" }) },
+    primaryModel: options.liveCodexDiscovery ? "openai/gpt-5.6-luna" : undefined,
+    mock: null,
   };
   const result = await runScenarioFlow({
     scenarioTitle: scenario.title,
@@ -169,6 +177,24 @@ async function runImageScenario(
       normalizeLowercaseStringOrEmpty,
       projectQaToolMessages,
       readEffectiveTools: async () => new Set(["image_generate"]),
+      requireToolSearchDiscoveryEvidence: async (
+        envArg: unknown,
+        evidence: Parameters<typeof requireToolSearchDiscoveryEvidence>[1],
+      ) => {
+        expect(envArg).toBe(env);
+        expect(evidence).toEqual({
+          sessionKey,
+          toolName: "image_generate",
+          expectedCallId: "image-1",
+          expectedSuccess: true,
+        });
+        if (options.liveCodexDiscovery === "missing") {
+          throw new Error("expected live happy-path tool_search discovery for image_generate");
+        }
+        return { searchCallId: "search-image" };
+      },
+      formatToolSearchDiscoveryReceipt: (phase: string, receipt: { searchCallId: string }) =>
+        `phase=${phase} search=${receipt.searchCallId}`,
       reset: () => state.reset(),
       runAgentPrompt,
       liveTurnTimeoutMs: (_env: unknown, value: number) => value,
@@ -231,6 +257,20 @@ describe("native image scenario delivery evidence", () => {
       expect(await result).toMatchObject({ status: "pass" });
     },
   );
+
+  it("requires linked searchable discovery for live Codex image generation", async () => {
+    await expect(runImageScenario({ liveCodexDiscovery: "missing" })).resolves.toMatchObject({
+      status: "fail",
+      details: expect.stringContaining(
+        "expected live happy-path tool_search discovery for image_generate",
+      ),
+    });
+    const result = await runImageScenario({ liveCodexDiscovery: "present" });
+    expect(result).toMatchObject({ status: "pass" });
+    expect(result.steps?.[0]?.details).toContain(
+      "image_generate tool_search discovery phase=happy search=search-image",
+    );
+  });
 
   it.each([
     ["duplicate message", "expected exactly one generated-image delivery"],

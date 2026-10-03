@@ -16,7 +16,7 @@ import {
   QA_LIVE_SETUP_TOKEN_VALUE_ENV,
 } from "./providers/live-frontier/auth.js";
 import { listMockCodexModelInfos } from "./providers/shared/mock-model-config.js";
-import type { RuntimeId } from "./runtime-id.js";
+import type { QaRuntimeSelection, RuntimeId } from "./runtime-id.js";
 
 const QA_GATEWAY_CHILD_BLOCKED_ENV_VARS = Object.freeze([
   // QA owns this child; parent service and test-runner markers describe a different process.
@@ -176,6 +176,7 @@ export async function stageQaCodexMockModelCatalog(params: {
 
 export function buildQaForcedRuntimeEnvPatch(params: {
   forcedRuntime?: RuntimeId;
+  runtimeSelection?: QaRuntimeSelection;
   providerMode: QaProviderMode;
   providerBaseUrl?: string;
   codexModelCatalogPath?: string;
@@ -186,7 +187,9 @@ export function buildQaForcedRuntimeEnvPatch(params: {
   }
   const patch: NodeJS.ProcessEnv = {
     OPENCLAW_BUILD_PRIVATE_QA: "1",
-    OPENCLAW_QA_FORCE_RUNTIME: params.forcedRuntime,
+    ...(params.runtimeSelection === "configured"
+      ? {}
+      : { OPENCLAW_QA_FORCE_RUNTIME: params.forcedRuntime }),
   };
   if (params.forcedRuntime !== "codex") {
     return patch;

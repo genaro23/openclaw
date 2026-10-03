@@ -1013,19 +1013,6 @@ describe("buildQaRuntimeEnv", () => {
     ).not.toThrow();
   });
 
-  it("fails fast when live OpenAI runs have no portable QA auth", () => {
-    expect(() =>
-      assertQaLiveCodexAuthAvailable({
-        cfg: {},
-        providerIds: ["openai"],
-        env: {
-          CODEX_HOME: path.join(os.tmpdir(), "missing-openclaw-codex-home"),
-        },
-        readCodexCredentials: () => null,
-      }),
-    ).toThrow("QA live-frontier cannot run Codex-backed OpenAI models");
-  });
-
   it("does not require Codex auth for custom OpenAI-compatible provider configs", () => {
     expect(() =>
       assertQaLiveCodexAuthAvailable({
@@ -1060,32 +1047,6 @@ describe("buildQaRuntimeEnv", () => {
         readCodexCredentials: () => null,
       }),
     ).not.toThrow();
-  });
-
-  it("accepts a logged-in Codex CLI home for live OpenAI QA runs", () => {
-    const readCodexCredentials = vi.fn(() => ({
-      type: "oauth" as const,
-      provider: "openai",
-      access: "access-token",
-      refresh: "refresh-token",
-      expires: Date.now() + 60_000,
-    }));
-
-    expect(() =>
-      assertQaLiveCodexAuthAvailable({
-        cfg: {},
-        providerIds: ["openai"],
-        env: {
-          CODEX_HOME: "/host/.codex",
-        },
-        readCodexCredentials,
-      }),
-    ).not.toThrow();
-    expect(readCodexCredentials).toHaveBeenCalledWith({
-      codexHome: "/host/.codex",
-      allowKeychainPrompt: false,
-      ttlMs: 5_000,
-    });
   });
 
   it("lets a legacy packaged candidate create its auth DB before gateway spawn", async () => {

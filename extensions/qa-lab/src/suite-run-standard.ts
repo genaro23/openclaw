@@ -146,6 +146,7 @@ export async function runQaFlowSuiteStandard(
       fastMode,
       thinkingDefault: params?.thinkingDefault,
       forcedRuntime: params?.forcedRuntime,
+      runtimeSelection: params?.runtimeSelection,
       claudeCliAuthMode: params?.claudeCliAuthMode,
       controlUiEnabled,
       enabledPluginIds,

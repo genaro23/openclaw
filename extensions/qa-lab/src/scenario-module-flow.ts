@@ -35,6 +35,7 @@ const qaFlowExecutionShape = {
   providerMode: qaFlowProviderModeSchema.optional(),
   retryCount: z.number().int().min(0).max(1).optional(),
   runtime: z.enum(["openclaw", "codex"]).optional(),
+  liveConfiguredRuntime: z.literal("codex").optional(),
   timeoutMs: z.number().int().positive().optional(),
 };
 
