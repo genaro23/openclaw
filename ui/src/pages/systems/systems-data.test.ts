@@ -66,7 +66,7 @@ function session(key: string, fields: Partial<GatewaySessionRow> = {}): GatewayS
 }
 
 describe("Systems inventory projection", () => {
-  it("omits completed worker history while keeping running workers and unresolved cleanup", () => {
+  it("keeps active workers, unresolved cleanup, and recent terminal worker history", () => {
     const states = ["attached", "destroying", "orphaned", "destroyed", "failed"] as const;
     const workers: EnvironmentSummary[] = states.map((state) => ({
       id: `worker:${state}`,
@@ -97,6 +97,8 @@ describe("Systems inventory projection", () => {
       "worker:attached",
       "worker:destroying",
       "worker:orphaned",
+      "worker:destroyed",
+      "worker:failed",
     ]);
   });
 

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeListNode } from "../../../../src/shared/node-list-types.js";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import type { GatewaySessionRow } from "../../api/types.ts";
 import { DesktopClient } from "../../components/desktop/desktop-client.ts";
 import { createConnectionHandle } from "../../components/desktop/desktop-panel.test-support.ts";
 import { DESKTOP_PANEL_TOGGLE_EVENT } from "../../components/panel-toggle-contract.ts";
@@ -21,7 +22,7 @@ import {
 } from "../../test-helpers/app-sidebar.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { SystemsController } from "./systems-controller.ts";
-import "./systems-page.ts";
+import { retainedWorkerError } from "./systems-page.ts";
 import "./systems-sidebar.ts";
 
 setupSidebarTest();
@@ -561,6 +562,92 @@ describe("Systems workspace", () => {
     await choose("status:all");
     expect(nodeNames()).toEqual(["Alpha laptop", "Delta laptop", "Beta laptop", "Zulu laptop"]);
     expect(names()).toContain("Preparing worker");
+  });
+
+  it("separates recent worker history and shows lifecycle details and errors", async () => {
+    const failedWorker: EnvironmentSummary = {
+      id: "worker:failed:cad",
+      type: "worker",
+      label: "CAD validation",
+      status: "error",
+      worker: {
+        providerId: "crabbox",
+        profileId: "cad-apple",
+        leaseId: "lease:cad-123",
+        state: "failed",
+        ageMs: 3_000,
+        attachedSessionIds: [],
+        tunnelStatus: "stopped",
+        error: "Bootstrap probe failed",
+      },
+    };
+    const destroyedWorker: EnvironmentSummary = {
+      ...failedWorker,
+      id: "worker:destroyed:cad",
+      label: "Completed CAD run",
+      status: "unavailable",
+      worker: {
+        providerId: "crabbox",
+        profileId: "cad-apple",
+        leaseId: "lease:cad-123",
+        state: "destroyed",
+        ageMs: 3_000,
+        attachedSessionIds: [],
+        tunnelStatus: "stopped",
+      },
+    };
+    const failedPlacement: GatewaySessionRow = {
+      key: "agent:cad-print-engineer:proof",
+      sessionId: "cad-proof",
+      kind: "direct",
+      updatedAt: 2,
+      placement: {
+        state: "failed",
+        generation: 3,
+        createdAtMs: 1,
+        updatedAtMs: 2,
+        stateChangedAtMs: 2,
+        environmentId: "worker:destroying:cad",
+        recoveryError: "Provider failed; cleanup retained",
+        recoveryAction: "stop-first",
+        terminalReason: "Provider failed",
+        terminalAtMs: 2,
+      },
+    };
+    expect(
+      retainedWorkerError({
+        environment: {
+          ...destroyedWorker,
+          id: "worker:destroying:cad",
+          status: "stopping",
+          worker: { ...destroyedWorker.worker!, state: "destroying" },
+        },
+        sessions: [{ kind: "retained-placement", session: failedPlacement }],
+      }),
+    ).toBe("Provider failed; cleanup retained");
+    const { controller } = harness(async () => [host, failedWorker, destroyedWorker]);
+    const { page, sidebar } = await mount(controller);
+
+    expect(
+      [...sidebar.querySelectorAll(".systems-group h3")].map((entry) =>
+        entry.textContent?.replace(/\s+/gu, " ").trim(),
+      ),
+    ).toEqual(["Recent worker history 2"]);
+    expect(
+      [...sidebar.querySelectorAll(".systems-machine__meta")].map((entry) =>
+        entry.textContent?.trim(),
+      ),
+    ).toEqual(["Linux", "Failed", "Destroyed"]);
+
+    controller.select(failedWorker.id);
+    controller.toggleDetails();
+    await page.updateComplete;
+    const details = page.querySelector(".systems-worker-details")?.textContent ?? "";
+    expect(details).toContain("Failed");
+    expect(details).toContain("crabbox");
+    expect(details).toContain("cad-apple");
+    expect(details).toContain("lease:cad-123");
+    expect(details).toContain("Bootstrap probe failed");
   });
 
   it("keeps disk histories attached to mount paths through reordering, removal, and return", async () => {
