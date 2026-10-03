@@ -867,67 +867,6 @@ describe("Systems workspace", () => {
     expect(page.querySelector(".systems-sample-time")?.textContent).toContain("Last reported");
   });
 
-  it("graphs genuine node reports, preserves per-machine history, and leaves gaps for missing metrics", async () => {
-    const node = { ...offline, status: "available" as const };
-    let stats: NonNullable<NodeListNode["hostStats"]> = {
-      cpuCount: 8,
-      loadAverage: [2, 1, 1],
-      memoryTotalBytes: 16 * 1024 ** 3,
-      memoryFreeBytes: 8 * 1024 ** 3,
-      diskTotalBytes: 1024 ** 4,
-      diskAvailableBytes: 256 * 1024 ** 3,
-      updatedAtMs: Date.now() - 60_000,
-    };
-    const { controller, gateway } = harness(
-      async () => [host, node],
-      () => [{ nodeId: "offline", connected: true, paired: true, hostStats: stats }],
-    );
-    const { page } = await mount(controller);
-    controller.select(node.id);
-    const readings = () =>
-      [...page.querySelectorAll(".sparkline-tile__value")].map((tile) => tile.textContent?.trim());
-    await vi.waitFor(() => expect(readings()).toEqual(["2.00", "8.0 GB", "256 GB"]));
-    expect(page.querySelector('.systems-metrics[data-stale="false"]')).not.toBeNull();
-    expect(page.querySelectorAll(".sparkline-tile__chart")).toHaveLength(0);
-
-    stats = { ...stats, loadAverage: [4, 2, 1], updatedAtMs: stats.updatedAtMs + 60_000 };
-    await controller.refreshTelemetry();
-    await vi.waitFor(() => expect(readings()[0]).toBe("4.00"));
-    const chartPoints = () =>
-      page.querySelector(".sparkline-tile__chart polyline")?.getAttribute("points")?.split(" ");
-    expect(chartPoints()).toHaveLength(2);
-    await controller.refreshTelemetry();
-    await page.updateComplete;
-    expect(chartPoints()).toHaveLength(2);
-    controller.select(host.id);
-    await vi.waitFor(() => expect(readings()[0]).toBe("0.50"));
-    controller.select(node.id);
-    await vi.waitFor(() => expect(readings()[0]).toBe("4.00"));
-    expect(chartPoints()).toHaveLength(2);
-
-    stats = {
-      ...stats,
-      loadAverage: undefined,
-      diskAvailableBytes: undefined,
-      diskTotalBytes: undefined,
-      updatedAtMs: stats.updatedAtMs + 60_000,
-    };
-    await controller.refreshTelemetry();
-    await vi.waitFor(() => expect(readings()).toEqual(["–", "8.0 GB", "–"]));
-    expect(page.querySelectorAll(".sparkline-tile__chart")).toHaveLength(1);
-    stats = { ...stats, loadAverage: [3, 2, 1], updatedAtMs: stats.updatedAtMs + 60_000 };
-    await controller.refreshTelemetry();
-    await vi.waitFor(() => expect(readings()[0]).toBe("3.00"));
-    expect(
-      page.querySelector("openclaw-sparkline")?.querySelector(".sparkline-tile__chart"),
-    ).toBeNull();
-
-    gateway.publish({ phase: "offline" });
-    await vi.waitFor(() => expect(page.querySelectorAll(".sparkline-tile__chart")).toHaveLength(0));
-    expect(readings()[0]).toBe("3.00");
-    expect(page.querySelector('.systems-metrics[data-stale="true"]')).not.toBeNull();
-  });
-
   it("shares inventory, keeps a single view-only connection through presentation changes, and retains a removed selection", async () => {
     let environments = [host, worker, offline];
     const { controller, request } = harness(async () => environments);

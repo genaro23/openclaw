@@ -22,7 +22,20 @@ const environments: EnvironmentSummary[] = [
   { id: "gateway", type: "local", status: "available" },
   { id: "node:headless", type: "node", status: "available", label: "Same name" },
   { id: "node:offline", type: "node", status: "unavailable", label: "Same name" },
-  { id: "worker:active", type: "worker", status: "available", desktop: true },
+  {
+    id: "worker:active",
+    type: "worker",
+    status: "available",
+    desktop: true,
+    worker: {
+      providerId: "crabbox",
+      nodeId: "managed-cloud-node",
+      state: "attached",
+      ageMs: 1_000,
+      attachedSessionIds: [],
+      tunnelStatus: "connected",
+    },
+  },
   { id: "worker:retained", type: "worker", status: "unavailable" },
 ];
 const systemInfo: SystemInfoResult = {
@@ -45,7 +58,7 @@ const inventory: SystemsInventory = {
   nodes: [
     { nodeId: "headless", connected: true },
     { nodeId: "offline", connected: false, hostStats },
-    { nodeId: "managed-cloud-node", connected: true },
+    { nodeId: "managed-cloud-node", connected: true, hostStats },
   ],
   gatewaySystemInfo: systemInfo,
   gatewaySampledAtMs: 1,
@@ -108,7 +121,7 @@ describe("Systems inventory projection", () => {
     expect(rows[0]?.gatewaySystemInfo).toBe(systemInfo);
     expect(rows[2]?.node?.hostStats).toEqual(hostStats);
     expect(rows[2]?.node?.connected).toBe(false);
-    expect(rows[3]?.node).toBeUndefined();
+    expect(rows[3]?.node).toMatchObject({ nodeId: "managed-cloud-node", hostStats });
   });
 
   it("uses placement before exec bindings and keeps offline runner identity", () => {

@@ -614,7 +614,11 @@ export class SystemsController {
       return;
     }
     const gatewayHost = selected.environment.id === "gateway";
-    if (!gatewayHost && selected.environment.type !== "node") {
+    if (
+      !gatewayHost &&
+      selected.environment.type !== "node" &&
+      !selected.environment.worker?.nodeId
+    ) {
       return;
     }
     const request = new AbortController();

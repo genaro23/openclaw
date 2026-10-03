@@ -116,9 +116,15 @@ export function projectSystemsInventory(
     add(execNode ? `node:${execNode}` : "gateway", execNode ? "exec-binding" : "gateway", session);
   }
   return inventory.environments.map((environment) => {
+    const nodeId =
+      environment.type === "node"
+        ? environment.id
+        : environment.worker?.nodeId
+          ? `node:${environment.worker.nodeId}`
+          : undefined;
     return {
       environment,
-      node: environment.type === "node" ? nodes.get(environment.id) : undefined,
+      node: nodeId ? nodes.get(nodeId) : undefined,
       gatewaySystemInfo:
         environment.id === "gateway" ? (inventory.gatewaySystemInfo ?? undefined) : undefined,
       sessions: relations.get(environment.id) ?? [],
