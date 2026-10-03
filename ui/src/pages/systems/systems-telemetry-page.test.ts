@@ -7,6 +7,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeListNode } from "../../../../src/shared/node-list-types.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import type { GatewaySessionRow } from "../../api/types.ts";
 import { createRuntimeConfigCapability } from "../../lib/config/runtime-config-capability.ts";
 import { setupSidebarTest } from "../../test-helpers/app-sidebar-setup.ts";
 import {
@@ -91,7 +92,7 @@ function harness(inventory: () => EnvironmentSummary[], nodes: () => NodeListNod
   const runtimeConfig = createRuntimeConfigCapability(gateway.gateway);
   runtimeConfigs.push(runtimeConfig);
   Object.assign(context, { basePath: "", navigate: vi.fn(), runtimeConfig });
-  return { controller: new SystemsController(context), gateway };
+  return { controller: new SystemsController(context), gateway, sessionsHarness };
 }
 
 async function mount(controller: SystemsController) {
@@ -112,6 +113,76 @@ function readings(page: HTMLElement): Array<string | undefined> {
 }
 
 describe("Systems resource telemetry", () => {
+  it("keeps the placed session name when a dedicated worker joins generic node telemetry", async () => {
+    const dedicatedWorker: EnvironmentSummary = {
+      id: "worker:cad-proof",
+      type: "worker",
+      status: "available",
+      worker: {
+        providerId: "crabbox",
+        profileId: "cad-apple",
+        nodeId: "dedicated-worker-node",
+        state: "attached",
+        ageMs: 1_000,
+        attachedSessionIds: ["cad-proof"],
+        tunnelStatus: "connected",
+      },
+    };
+    const telemetryNode: NodeListNode = {
+      nodeId: "dedicated-worker-node",
+      displayName: "Cloud worker cad-apple",
+      connected: true,
+      paired: true,
+    };
+    const placedSession: GatewaySessionRow = {
+      key: "agent:cad-print-engineer:proof",
+      sessionId: "cad-proof",
+      displayName: "Coupon geometry proof",
+      kind: "direct",
+      updatedAt: 2,
+      placement: {
+        state: "active",
+        generation: 1,
+        createdAtMs: 1,
+        updatedAtMs: 2,
+        stateChangedAtMs: 2,
+        environmentId: dedicatedWorker.id,
+        activeOwnerEpoch: 1,
+        workerBundleHash: "a".repeat(64),
+        workspaceBaseManifestRef: "manifest",
+        remoteWorkspaceDir: "/work",
+      },
+    };
+    const { controller, sessionsHarness } = harness(
+      () => [dedicatedWorker],
+      () => [telemetryNode],
+    );
+    sessionsHarness.publish({
+      result: {
+        ts: 2,
+        path: "",
+        count: 1,
+        defaults: { modelProvider: null, model: null, contextTokens: null },
+        sessions: [placedSession],
+      },
+    });
+
+    const { page, sidebar } = await mount(controller);
+    await sidebar.updateComplete;
+
+    expect(sidebar.querySelector(".systems-machine__name")?.textContent?.trim()).toBe(
+      "Coupon geometry proof",
+    );
+    expect(page.querySelector(".systems-heading h1")?.textContent?.trim()).toBe(
+      "Coupon geometry proof",
+    );
+    expect(
+      page
+        .querySelector(`.systems-mobile-picker option[value="${dedicatedWorker.id}"]`)
+        ?.textContent?.trim(),
+    ).toBe("Coupon geometry proof");
+  });
+
   it("graphs genuine node reports, preserves per-machine history, and leaves gaps", async () => {
     let stats: NonNullable<NodeListNode["hostStats"]> = {
       cpuCount: 8,

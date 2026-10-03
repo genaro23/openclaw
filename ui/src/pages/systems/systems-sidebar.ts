@@ -45,8 +45,7 @@ function renderMenuOption(value: string, label: string, checked: boolean) {
 }
 
 export function systemName(row: SystemsInventoryRow): string {
-  const named =
-    row.gatewaySystemInfo?.machineName ?? row.environment.label ?? row.node?.displayName;
+  const named = row.gatewaySystemInfo?.machineName ?? row.environment.label;
   if (named) {
     return named;
   }
@@ -64,6 +63,9 @@ export function systemName(row: SystemsInventoryRow): string {
     if (worker.profileId) {
       return `${worker.providerId} · ${worker.profileId}`;
     }
+  }
+  if (row.node?.displayName) {
+    return row.node.displayName;
   }
   return row.environment.id;
 }
