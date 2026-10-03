@@ -5,6 +5,7 @@ import {
   SessionGoalOperationError,
   type SessionGoalOperationErrorCode,
 } from "../config/sessions/goals-operations.types.js";
+import { SqliteSessionMutationConflictError } from "../config/sessions/session-mutation-conflict-error.js";
 import { SessionPendingInputCustodyError } from "../config/sessions/session-pending-input-custody-error.js";
 import { WorkerSessionAlreadyAttachedError } from "../gateway/worker-environments/session-attachment.js";
 import { GatewayStateOwnerContentionError } from "../infra/gateway-state-owner.js";
@@ -36,6 +37,7 @@ type StateMigrationKind = ConstructorParameters<
 >[0];
 
 export type ErrorIdentity =
+  | { type: "session-mutation-conflict"; operationLabel: string }
   | { type: "session-goal-operation"; goalCode: SessionGoalOperationErrorCode }
   | { type: "worker-session-already-attached"; sessionId: string; environmentId: string }
   | {
@@ -78,6 +80,9 @@ export type ErrorIdentity =
   | { type: "agent-media-migration"; pathname: string; schemaVersion: number };
 
 export function identifyError(error: Error): ErrorIdentity {
+  if (error instanceof SqliteSessionMutationConflictError) {
+    return { type: "session-mutation-conflict", operationLabel: error.operationLabel };
+  }
   if (error instanceof WorkerSessionAlreadyAttachedError) {
     return {
       type: "worker-session-already-attached",
@@ -195,6 +200,10 @@ function isBlobOperation(value: unknown): value is PluginBlobStoreError["operati
 
 export function parseIdentity(node: Record<string, unknown>): ErrorIdentity | undefined {
   switch (node.type) {
+    case "session-mutation-conflict":
+      return typeof node.operationLabel === "string"
+        ? { type: node.type, operationLabel: node.operationLabel }
+        : undefined;
     case "worker-session-already-attached":
       return typeof node.sessionId === "string" && typeof node.environmentId === "string"
         ? { type: node.type, sessionId: node.sessionId, environmentId: node.environmentId }
@@ -284,6 +293,8 @@ function unreachableErrorNode(node: never): never {
 
 export function createError(node: ErrorIdentity & { message: string }): Error {
   switch (node.type) {
+    case "session-mutation-conflict":
+      return new SqliteSessionMutationConflictError(node.operationLabel);
     case "worker-session-already-attached":
       return new WorkerSessionAlreadyAttachedError(node.sessionId, node.environmentId);
     case "workspace-alias-repointed":
