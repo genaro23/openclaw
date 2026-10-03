@@ -39,19 +39,10 @@ export type SubsystemLogger = {
 type ChalkInstance = InstanceType<typeof Chalk>;
 
 const inspectValue: ((value: unknown) => string) | null = (() => {
-  const getBuiltinModule = (
-    process as NodeJS.Process & {
-      getBuiltinModule?: (id: string) => unknown;
-    }
-  ).getBuiltinModule;
-  if (typeof getBuiltinModule !== "function") {
-    return null;
-  }
+  const getBuiltinModule = process.getBuiltinModule;
   try {
-    const utilNamespace = getBuiltinModule("util") as {
-      inspect?: (value: unknown) => string;
-    };
-    return typeof utilNamespace.inspect === "function" ? utilNamespace.inspect : null;
+    const inspect = getBuiltinModule?.("util").inspect;
+    return typeof inspect === "function" ? inspect : null;
   } catch {
     return null;
   }
