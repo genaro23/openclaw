@@ -213,6 +213,22 @@ runs the same migration. Repeating Doctor leaves the normalized row and its IDs
 unchanged. Published SDK and operator input normalization remain available at
 the input boundary.
 
+## Channel account routing during an update
+
+Doctor preserves existing channel account maps and their implicit default route.
+Shared root policy never creates an extra `accounts.default` beside named accounts.
+An empty account map can still receive migrated single-account fields; plugins
+such as WhatsApp keep their supported shared policy at the root.
+
+For WhatsApp configs damaged by an earlier promotion, Doctor moves a policy-only,
+unlinked `accounts.default` back to the root and removes the synthesized account,
+with a visible repair note. Named-account overrides remain unchanged. Explicit
+default selections or bindings, account-specific settings, and credential files
+(including backups and legacy credentials) preserve the default account. If
+credential state cannot be inspected, Doctor leaves the account unchanged.
+The update-time Doctor pass uses the same repair and normal config backup flow;
+repeating Doctor does not change the repaired config.
+
 ## Channel ownership during an update
 
 When Doctor migrates a legacy `agents.list` roster without a `default: true` marker

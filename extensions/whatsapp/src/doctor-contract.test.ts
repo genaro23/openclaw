@@ -1,6 +1,11 @@
 // Whatsapp tests cover doctor contract plugin behavior.
+import fs from "node:fs";
+import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { describe, expect, it } from "vitest";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveMergedWhatsAppAccountConfig } from "./account-config.js";
+import { listWhatsAppAccountIds, resolveDefaultWhatsAppAccountId } from "./account-ids.js";
 import { legacyConfigRules, normalizeCompatibilityConfig } from "./doctor-contract.js";
 
 function whatsappConfig(entry: Record<string, unknown>): OpenClawConfig {
@@ -135,4 +140,129 @@ describe("whatsapp normalizeCompatibilityConfig streaming aliases", () => {
     const second = normalizeCompatibilityConfig({ cfg: first.config });
     expect(second.changes).toEqual([]);
   });
+});
+
+describe("WhatsApp Doctor account routing repair", () => {
+  const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+  let oauthDir: string;
+  beforeEach(() => {
+    oauthDir = tempDirs.make("whatsapp-doctor-routing-");
+    vi.stubEnv("OPENCLAW_OAUTH_DIR", oauthDir);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const damagedConfig = (): OpenClawConfig =>
+    whatsappConfig({
+      dmPolicy: "pairing",
+      accounts: {
+        default: { dmPolicy: "allowlist", allowFrom: ["+15550001111"], groupPolicy: "disabled" },
+        work: { authDir: "/synthetic/work" },
+        personal: { authDir: "/synthetic/personal", dmPolicy: "disabled" },
+      },
+    });
+
+  it("restores the implicit route and shared policy once without mutating input", () => {
+    const cfg = damagedConfig();
+    const before = structuredClone(cfg);
+    const policies = ["work", "personal"].map((accountId) =>
+      resolveMergedWhatsAppAccountConfig({ cfg, accountId }),
+    );
+    expect(resolveDefaultWhatsAppAccountId(cfg)).toBe("default");
+    expect(legacyConfigRules.some((rule) => rule.match?.(cfg.channels?.whatsapp, cfg))).toBe(true);
+    const first = normalizeCompatibilityConfig({ cfg });
+    expect(
+      legacyConfigRules.some((rule) => rule.match?.(first.config.channels?.whatsapp, first.config)),
+    ).toBe(false);
+    expect(listWhatsAppAccountIds(first.config)).toEqual(["personal", "work"]);
+    expect(resolveDefaultWhatsAppAccountId(first.config)).toBe("personal");
+    expect(
+      ["work", "personal"].map((accountId) =>
+        resolveMergedWhatsAppAccountConfig({ cfg: first.config, accountId }),
+      ),
+    ).toEqual(policies);
+    expect(first.changes).toEqual([
+      expect.stringContaining("Removed synthesized channels.whatsapp.accounts.default"),
+    ]);
+    expect(cfg).toEqual(before);
+    expect(normalizeCompatibilityConfig({ cfg: first.config })).toEqual({
+      config: first.config,
+      changes: [],
+    });
+  });
+
+  it.each([
+    "authDir",
+    "name",
+    "enabled",
+    "defaultAccount",
+    "binding",
+    "bindingAlias",
+    "rootAuth",
+    "onlyDefault",
+    "defaultAlias",
+  ])("preserves an intentional default: %s", (kind) => {
+    const cfg = damagedConfig();
+    const channel = cfg.channels?.whatsapp;
+    if (!channel?.accounts?.default) {
+      throw new Error("Expected the damaged WhatsApp fixture to contain a default account");
+    }
+    const defaultAccount = channel.accounts.default;
+    if (kind === "authDir") {
+      defaultAccount.authDir = "/synthetic/default";
+    }
+    if (kind === "name") {
+      defaultAccount.name = "Personal";
+    }
+    if (kind === "enabled") {
+      defaultAccount.enabled = false;
+    }
+    if (kind === "defaultAccount") {
+      channel.defaultAccount = "default";
+    }
+    if (kind === "defaultAlias") {
+      channel.defaultAccount = " Default ";
+    }
+    if (kind === "rootAuth") {
+      Object.assign(channel, { authDir: "/synthetic/root" });
+    }
+    if (kind === "binding" || kind === "bindingAlias") {
+      cfg.bindings = [
+        {
+          agentId: "main",
+          match: {
+            channel: kind === "bindingAlias" ? " WhatsApp " : "whatsapp",
+            accountId: "default",
+          },
+        },
+      ];
+    }
+    if (kind === "onlyDefault") {
+      channel.accounts = { default: defaultAccount };
+    }
+    expect(normalizeCompatibilityConfig({ cfg })).toEqual({ config: cfg, changes: [] });
+  });
+
+  it("preserves the account when credential inspection fails", () => {
+    const cfg = damagedConfig();
+    vi.spyOn(fs, "readdirSync").mockImplementation(() => {
+      throw Object.assign(new Error("denied"), { code: "EACCES" });
+    });
+    expect(normalizeCompatibilityConfig({ cfg })).toEqual({ config: cfg, changes: [] });
+  });
+
+  it.each(["creds.json", "creds.json.bak", "session-test.json"])(
+    "preserves default credential evidence: %s",
+    (file) => {
+      for (const directory of [oauthDir, path.join(oauthDir, "whatsapp", "default")]) {
+        fs.mkdirSync(directory, { recursive: true });
+        fs.writeFileSync(path.join(directory, file), "synthetic");
+        const cfg = damagedConfig();
+        expect(normalizeCompatibilityConfig({ cfg })).toEqual({ config: cfg, changes: [] });
+        fs.unlinkSync(path.join(directory, file));
+      }
+    },
+  );
 });
