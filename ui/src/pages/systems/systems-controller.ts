@@ -25,6 +25,27 @@ import {
 
 const TELEMETRY_SAMPLE_LIMIT = 120;
 
+function workerPlacementInventoryKey(context: ApplicationContext): string {
+  return (context.sessions.state.result?.sessions ?? [])
+    .flatMap((session) => {
+      const placement = session.placement;
+      if (!placement || placement.state === "local" || placement.state === "requested") {
+        return [];
+      }
+      return [
+        [
+          session.key,
+          placement.generation,
+          placement.state,
+          placement.environmentId ?? "",
+          placement.stateChangedAtMs,
+        ].join("\u0000"),
+      ];
+    })
+    .toSorted()
+    .join("\u0001");
+}
+
 export type SystemsSortMode = "name" | "online-first" | "offline-first";
 export type SystemsStatusFilter = "all" | "online" | "offline";
 
@@ -58,6 +79,7 @@ export class SystemsController {
   private telemetryRequest: AbortController | undefined;
   private presented = false;
   private refreshQueued?: "automatic" | "manual";
+  private workerPlacementKey = "";
 
   constructor(readonly context: ApplicationContext) {
     this.scope = gatewayPresentationScope(context.gateway);
@@ -375,6 +397,7 @@ export class SystemsController {
       this.resetDesktopSetup();
       return;
     }
+    this.workerPlacementKey = workerPlacementInventoryKey(this.context);
     this.subscriptions = [
       this.context.gateway.subscribe((snapshot) => {
         const changed = this.lifecycle.transition(snapshot);
@@ -409,8 +432,12 @@ export class SystemsController {
           event.event === "presence" ||
           event.event === "node.pair.resolved" ||
           event.event === "node.runnerInventory.changed" ||
-          event.event === "config.changed"
+          event.event === "config.changed" ||
+          event.event === "sessions.changed"
         ) {
+          // Placement mutations publish sessions.changed before the shared session catalog
+          // necessarily exposes the replacement row. Refresh inventory directly from the
+          // durable event so an attached worker cannot remain visually stuck after reclaim.
           void this.refresh();
         } else if (
           event.event === "node.hostStats" &&
@@ -422,8 +449,17 @@ export class SystemsController {
         }
       }),
       this.context.sessions.subscribe(() => {
+        const workerPlacementKey = workerPlacementInventoryKey(this.context);
+        const placementChanged = workerPlacementKey !== this.workerPlacementKey;
+        this.workerPlacementKey = workerPlacementKey;
         this.projectRows();
         this.notify();
+        // Session placement and environments.list are separate read models. Re-projecting
+        // rows cannot turn a cached Attached environment into its terminal provider state,
+        // so reconcile the canonical inventory whenever a worker placement advances.
+        if (placementChanged) {
+          void this.refresh();
+        }
       }),
       this.context.runtimeConfig.subscribe(() => this.notify()),
     ];

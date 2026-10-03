@@ -2,6 +2,7 @@
 import type {
   BackupStatusResult,
   EnvironmentSummary,
+  SessionPlacement,
   SystemInfoResult,
 } from "@openclaw/gateway-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +19,7 @@ import { setupSidebarTest } from "../../test-helpers/app-sidebar-setup.ts";
 import {
   createContext,
   createGatewayHarness,
-  createSessions,
+  createSessionsHarness,
 } from "../../test-helpers/app-sidebar.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { SystemsController } from "./systems-controller.ts";
@@ -130,12 +131,13 @@ function harness(
       ["operator.admin"],
     ),
   });
-  const context = createContext(gateway.gateway, createSessions("main", []));
+  const sessionsHarness = createSessionsHarness("main", []);
+  const context = createContext(gateway.gateway, sessionsHarness.sessions);
   const runtimeConfig = createRuntimeConfigCapability(gateway.gateway);
   runtimeConfigs.push(runtimeConfig);
   Object.assign(context, { basePath: "", navigate: vi.fn(), runtimeConfig });
   const controller = new SystemsController(context);
-  return { controller, gateway, context, request };
+  return { controller, gateway, context, request, sessionsHarness };
 }
 
 async function mount(controller: SystemsController) {
@@ -648,6 +650,126 @@ describe("Systems workspace", () => {
     expect(details).toContain("cad-apple");
     expect(details).toContain("lease:cad-123");
     expect(details).toContain("Bootstrap probe failed");
+  });
+
+  it("reconciles worker inventory when a session placement reaches a terminal state", async () => {
+    let currentWorker: EnvironmentSummary = {
+      ...worker,
+      worker: {
+        providerId: "crabbox",
+        profileId: "cad-apple",
+        leaseId: "lease:cad-123",
+        state: "attached",
+        ageMs: 3_000,
+        attachedSessionIds: ["cad-proof"],
+        tunnelStatus: "connected",
+      },
+    };
+    const { controller, request, sessionsHarness } = harness(async () => [host, currentWorker]);
+    const placement = (
+      state: "active" | "reclaimed",
+      stateChangedAtMs: number,
+    ): SessionPlacement => {
+      const timing = {
+        generation: 1,
+        createdAtMs: 1,
+        updatedAtMs: stateChangedAtMs,
+        stateChangedAtMs,
+      };
+      return state === "active"
+        ? {
+            ...timing,
+            state,
+            environmentId: worker.id,
+            activeOwnerEpoch: 1,
+            workerBundleHash: "a".repeat(64),
+            workspaceBaseManifestRef: "manifest",
+            remoteWorkspaceDir: "/work",
+          }
+        : {
+            ...timing,
+            state,
+            environmentId: worker.id,
+            activeOwnerEpoch: 1,
+          };
+    };
+    const sessionRow = (state: "active" | "reclaimed", stateChangedAtMs: number) => ({
+      key: "agent:cad-print-engineer:proof",
+      sessionId: "cad-proof",
+      kind: "direct" as const,
+      updatedAt: stateChangedAtMs,
+      placement: placement(state, stateChangedAtMs),
+    });
+    sessionsHarness.publish({
+      result: {
+        ts: 1,
+        path: "",
+        count: 1,
+        defaults: { modelProvider: null, model: null, contextTokens: null },
+        sessions: [sessionRow("active", 2)],
+      },
+    });
+    await mount(controller);
+    expect(controller.rows[1]?.environment.worker?.state).toBe("attached");
+
+    currentWorker = {
+      ...currentWorker,
+      status: "unavailable",
+      worker: {
+        ...currentWorker.worker!,
+        state: "destroyed",
+        attachedSessionIds: [],
+        tunnelStatus: "stopped",
+      },
+    };
+    sessionsHarness.publish({
+      result: {
+        ts: 2,
+        path: "",
+        count: 1,
+        defaults: { modelProvider: null, model: null, contextTokens: null },
+        sessions: [sessionRow("reclaimed", 3)],
+      },
+    });
+
+    await vi.waitFor(() => expect(controller.rows[1]?.environment.worker?.state).toBe("destroyed"));
+    expect(request.mock.calls.filter(([method]) => method === "environments.list")).toHaveLength(2);
+  });
+
+  it("reconciles worker inventory directly from durable session invalidation", async () => {
+    let currentWorker: EnvironmentSummary = {
+      ...worker,
+      worker: {
+        providerId: "crabbox",
+        profileId: "cad-apple",
+        leaseId: "lease:cad-123",
+        state: "attached",
+        ageMs: 3_000,
+        attachedSessionIds: ["cad-proof"],
+        tunnelStatus: "connected",
+      },
+    };
+    const { controller, gateway, request } = harness(async () => [host, currentWorker]);
+    await mount(controller);
+    expect(controller.rows[1]?.environment.worker?.state).toBe("attached");
+
+    currentWorker = {
+      ...currentWorker,
+      status: "unavailable",
+      worker: {
+        ...currentWorker.worker!,
+        state: "destroyed",
+        attachedSessionIds: [],
+        tunnelStatus: "stopped",
+      },
+    };
+    gateway.publishEvent("sessions.changed", {
+      sessionKey: "agent:cad-print-engineer:proof",
+      reason: "reclaim",
+    });
+
+    await vi.waitFor(() => expect(controller.rows[1]?.environment.worker?.state).toBe("destroyed"));
+    expect(request.mock.calls.filter(([method]) => method === "environments.list")).toHaveLength(2);
   });
 
   it("keeps disk histories attached to mount paths through reordering, removal, and return", async () => {
