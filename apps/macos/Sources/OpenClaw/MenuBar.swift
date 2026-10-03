@@ -133,7 +133,7 @@ struct OpenClawApp: App {
                 .keyboardShortcut("r", modifiers: .command)
 
                 Button("Systems") {
-                    AppNavigationActions.openPrimaryWebRoute(DashboardRouteMap.systemsPagePath)
+                    AppNavigationActions.openSelectedWebRoute(DashboardRouteMap.systemsPagePath)
                 }
 
                 Divider()
