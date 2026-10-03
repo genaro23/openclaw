@@ -23,7 +23,7 @@ import {
 } from "../../test-helpers/app-sidebar.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { SystemsController } from "./systems-controller.ts";
-import { retainedWorkerError } from "./systems-page.ts";
+import "./systems-page.ts";
 import "./systems-sidebar.ts";
 
 setupSidebarTest();
@@ -616,30 +616,40 @@ describe("Systems workspace", () => {
         terminalAtMs: 2,
       },
     };
-    expect(
-      retainedWorkerError({
-        environment: {
-          ...destroyedWorker,
-          id: "worker:destroying:cad",
-          status: "stopping",
-          worker: { ...destroyedWorker.worker!, state: "destroying" },
-        },
-        sessions: [{ kind: "retained-placement", session: failedPlacement }],
-      }),
-    ).toBe("Provider failed; cleanup retained");
-    const { controller } = harness(async () => [host, failedWorker, destroyedWorker]);
+    const retainedWorker: EnvironmentSummary = {
+      ...destroyedWorker,
+      id: "worker:destroying:cad",
+      label: "Retained CAD run",
+      status: "stopping",
+      worker: { ...destroyedWorker.worker!, state: "destroying" },
+    };
+    const { controller, sessionsHarness } = harness(async () => [
+      host,
+      failedWorker,
+      destroyedWorker,
+      retainedWorker,
+    ]);
+    sessionsHarness.publish({
+      result: {
+        ts: 2,
+        path: "",
+        count: 1,
+        defaults: { modelProvider: null, model: null, contextTokens: null },
+        sessions: [failedPlacement],
+      },
+    });
     const { page, sidebar } = await mount(controller);
 
     expect(
       [...sidebar.querySelectorAll(".systems-group h3")].map((entry) =>
         entry.textContent?.replace(/\s+/gu, " ").trim(),
       ),
-    ).toEqual(["Recent worker history 2"]);
+    ).toEqual(["Active workers 1", "Recent worker history 2"]);
     expect(
       [...sidebar.querySelectorAll(".systems-machine__meta")].map((entry) =>
         entry.textContent?.trim(),
       ),
-    ).toEqual(["Linux", "Failed", "Destroyed"]);
+    ).toEqual(["Linux", "Destroying", "Failed", "Destroyed"]);
 
     controller.select(failedWorker.id);
     controller.toggleDetails();
@@ -650,6 +660,11 @@ describe("Systems workspace", () => {
     expect(details).toContain("cad-apple");
     expect(details).toContain("lease:cad-123");
     expect(details).toContain("Bootstrap probe failed");
+
+    controller.select(retainedWorker.id);
+    await page.updateComplete;
+    const retainedDetails = page.querySelector(".systems-worker-details")?.textContent ?? "";
+    expect(retainedDetails).toContain("Provider failed; cleanup retained");
   });
 
   it("reconciles worker inventory when a session placement reaches a terminal state", async () => {
@@ -737,6 +752,7 @@ describe("Systems workspace", () => {
   });
 
   it("reconciles worker inventory directly from durable session invalidation", async () => {
+    vi.useFakeTimers();
     let currentWorker: EnvironmentSummary = {
       ...worker,
       worker: {
@@ -768,7 +784,8 @@ describe("Systems workspace", () => {
       reason: "reclaim",
     });
 
-    await vi.waitFor(() => expect(controller.rows[1]?.environment.worker?.state).toBe("destroyed"));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(controller.rows[1]?.environment.worker?.state).toBe("destroyed");
     expect(request.mock.calls.filter(([method]) => method === "environments.list")).toHaveLength(2);
   });
 

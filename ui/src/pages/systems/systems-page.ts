@@ -134,7 +134,7 @@ function renderMeasurements(row: SystemsInventoryRow, controller: SystemsControl
   );
 }
 
-export function retainedWorkerError(row: SystemsInventoryRow): string | undefined {
+function retainedWorkerError(row: SystemsInventoryRow): string | undefined {
   for (const relation of row.sessions) {
     const placement = relation.session.placement;
     if (placement?.state === "failed") {
