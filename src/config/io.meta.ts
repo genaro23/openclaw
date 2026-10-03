@@ -61,7 +61,6 @@ export function projectWebhookMigrationIncludeWrite(
 
 export function stampConfigWriteMetadata(
   cfg: OpenClawConfig,
-  _now: string = new Date().toISOString(),
   version: string = VERSION,
   previousConfig?: unknown,
 ): OpenClawConfig {
