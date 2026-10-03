@@ -12,7 +12,6 @@ import {
   ModelSelectionLockedError,
   resolvePersistedSessionRuntimeId,
 } from "openclaw/plugin-sdk/model-session-runtime";
-import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
 import { isValidAgentHarnessSessionStoreEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import {
   asOptionalRecord,
@@ -23,6 +22,7 @@ import {
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import type { OpenClawPluginApi } from "../api.js";
 import { resolveVoiceCallSessionKey, type VoiceCallConfig } from "./config.js";
+import { resolveCallAgentId } from "./resolve-call-agent-id.js";
 import { resolveVoiceResponseModel } from "./response-model.js";
 
 type VoiceResponseParams = {
@@ -39,7 +39,7 @@ type VoiceResponseParams = {
   /** Caller ownership prepared by the call boundary. */
   senderIsOwner: boolean | undefined;
   /** Agent frozen on the call record. */
-  agentId?: string;
+  agentId: string;
   /** Audible call transcript, used only for bounded first-turn opening context. */
   transcript: Array<{ speaker: "user" | "bot"; text: string }>;
   userMessage: string;
@@ -304,7 +304,7 @@ export async function generateVoiceResponse(
     };
   }
   const cfg = coreConfig;
-  const agentId = normalizeAgentId(params.agentId ?? voiceConfig.agentId);
+  const agentId = resolveCallAgentId(params);
 
   const resolvedSessionKey = resolveVoiceCallSessionKey({
     config: { ...voiceConfig, agentId },
