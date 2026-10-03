@@ -316,7 +316,7 @@ async function runGatewayUpdateCheckOwned(
     installStatus,
     channel: configuredChannel,
     readOnlySchedule,
-  } = await prepareStartupUpdateInstall(lifecycle, configChannel, params.signal);
+  } = await prepareStartupUpdateInstall(lifecycle.initialize, configChannel, params.signal);
   if (readOnlySchedule) {
     updateCampaign.clear();
     setAvailable(null);
