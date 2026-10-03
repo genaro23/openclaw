@@ -62,7 +62,6 @@ export type SessionListFilteredEntries = {
 export type SessionListFilterParams = {
   cfg: OpenClawConfig;
   entries: Iterable<SessionEntryPair>;
-  candidatesPrepared?: boolean;
   entriesSorted?: boolean;
   getTarget: SessionListTargetLookup;
   modelCatalog?: SessionListModelCatalog | ModelCatalogEntry[];
@@ -80,33 +79,8 @@ export type SessionListFilterParams = {
   shouldYield?: () => boolean;
 };
 
-/** The predicate and its cache key consume the same membership dependencies. */
-export function projectSessionListCandidateOptions(opts: SessionsListParams) {
-  return {
-    includeGlobal: opts.includeGlobal,
-    includeUnknown: opts.includeUnknown,
-    spawnedBy: opts.spawnedBy,
-    label: opts.label,
-    boardFace: opts.boardFace,
-    agentId: opts.agentId,
-    excludeCron: opts.excludeCron,
-    excludeSystem: opts.excludeSystem,
-    excludeSubagents: opts.excludeSubagents,
-    archived: opts.archived,
-    requireLastInteraction: opts.requireLastInteraction,
-    projectId: opts.projectId,
-    workspaceDir: opts.workspaceDir,
-    group: opts.group,
-    pinned: opts.pinned,
-  };
-}
-
-export function* filterSessionCandidateEntries(
-  params: Omit<SessionListFilterParams, "opts"> & {
-    opts: ReturnType<typeof projectSessionListCandidateOptions>;
-  },
-): SynchronousWork<SessionEntryPair[]> {
-  const { opts, now, shouldYield } = params;
+function createSessionCandidateFilter(params: SessionListFilterParams) {
+  const { opts, now } = params;
   let rowContext: SessionListRowContext | undefined;
   const getRowContext = () => (rowContext ??= params.getRowContext());
   const includeGlobal = opts.includeGlobal === true;
@@ -115,7 +89,7 @@ export function* filterSessionCandidateEntries(
   const label = normalizeOptionalString(opts.label) ?? "";
   const boardFace = opts.boardFace;
   const agentId = typeof opts.agentId === "string" ? normalizeAgentId(opts.agentId) : "";
-  const keepCandidate = ([key, entry]: SessionEntryPair) => {
+  return ([key, entry]: SessionEntryPair) => {
     const target = expectDefined(params.getTarget(key), "selection row owner");
     const { selection } = target;
     const storeKey = target.storeKey ?? key;
@@ -198,16 +172,6 @@ export function* filterSessionCandidateEntries(
     }
     return true;
   };
-  const candidateEntries: SessionEntryPair[] = [];
-  for (const pair of params.entries) {
-    if (keepCandidate(pair)) {
-      candidateEntries.push(pair);
-    }
-    if (shouldYield?.()) {
-      yield;
-    }
-  }
-  return candidateEntries;
 }
 
 function createActivityPulse(opts: SessionsListParams): SessionActivityPulse | undefined {
@@ -271,10 +235,9 @@ export function* filterSessionEntries(
     : undefined;
   const involvingActorId = normalizeOptionalString(params.involvingActorId);
 
-  // The caller owns these resident entries and their prepared visibility filter.
-  const filterCandidates = params.candidatesPrepared && !opts.involvingProfileId;
+  // Person references resolve before candidate filters; ordinary reads need no roster copy.
   const visibleEntries: SessionEntryPair[] = [];
-  if (!filterCandidates) {
+  if (opts.involvingProfileId) {
     for (const pair of params.entries) {
       if (params.entryFilter?.(pair[0], pair[1]) ?? true) {
         visibleEntries.push(pair);
@@ -311,16 +274,8 @@ export function* filterSessionEntries(
   }
   const selectedProfileId = profileReference?.value;
 
-  const candidateEntries = filterCandidates
-    ? params.entries
-    : params.candidatesPrepared
-      ? visibleEntries
-      : yield* filterSessionCandidateEntries({
-          ...params,
-          opts: projectSessionListCandidateOptions(opts),
-          entries: visibleEntries,
-          getRowContext,
-        });
+  const candidateEntries = opts.involvingProfileId ? visibleEntries : params.entries;
+  const keepCandidate = createSessionCandidateFilter({ ...params, getRowContext });
   // Excluded rows must not participate in search or ownership resolution.
   const matchesSearch = search
     ? createSessionListSearchMatcher({
@@ -362,7 +317,10 @@ export function* filterSessionEntries(
     }
     const key = pair[0];
     const entry = pair[1];
-    if (filterCandidates && params.entryFilter?.(key, entry) === false) {
+    if (
+      (!opts.involvingProfileId && params.entryFilter?.(key, entry) === false) ||
+      !keepCandidate(pair)
+    ) {
       continue;
     }
     if (matchesSearch && !matchesSearch(key, entry)) {
