@@ -132,6 +132,10 @@ struct OpenClawApp: App {
                 }
                 .keyboardShortcut("r", modifiers: .command)
 
+                Button("Systems") {
+                    AppNavigationActions.openPrimaryWebRoute(DashboardRouteMap.systemsPagePath)
+                }
+
                 Divider()
 
                 if self.state.nativeExperienceEnabled {
