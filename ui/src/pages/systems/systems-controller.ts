@@ -481,8 +481,7 @@ export class SystemsController {
         // rows cannot turn a cached Attached environment into its terminal provider state,
         // so reconcile the canonical inventory whenever a worker placement advances.
         if (placementChanged) {
-          this.eventRefresh.absorb();
-          void this.refresh();
+          this.eventRefresh.schedule();
         }
       }),
       this.context.runtimeConfig.subscribe(() => this.notify()),

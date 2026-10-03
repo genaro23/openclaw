@@ -668,6 +668,7 @@ describe("Systems workspace", () => {
   });
 
   it("reconciles worker inventory when a session placement reaches a terminal state", async () => {
+    vi.useFakeTimers();
     let currentWorker: EnvironmentSummary = {
       ...worker,
       worker: {
@@ -747,7 +748,8 @@ describe("Systems workspace", () => {
       },
     });
 
-    await vi.waitFor(() => expect(controller.rows[1]?.environment.worker?.state).toBe("destroyed"));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(controller.rows[1]?.environment.worker?.state).toBe("destroyed");
     expect(request.mock.calls.filter(([method]) => method === "environments.list")).toHaveLength(2);
   });
 
