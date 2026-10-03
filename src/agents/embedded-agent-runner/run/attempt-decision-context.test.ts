@@ -102,6 +102,13 @@ describe("bounded Decision conversation projection", () => {
           display: false,
           timestamp: 3,
         },
+        {
+          role: "user",
+          content: "private legacy runtime",
+          runtimeContextCarrier: true,
+          runtimeContextCarrierRetained: false,
+          timestamp: 4,
+        },
       ],
       "Try again",
     );
