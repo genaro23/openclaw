@@ -156,6 +156,65 @@ describe("native session binding leases", () => {
     expect(values.get(key)?.lease?.token).toBe("peer-owner");
   });
 
+  it("preserves renewal failure after retained cleanup authority expires", async () => {
+    vi.useFakeTimers();
+    const { state } = createBindingTestState();
+    const key = "binding-failed-renewal";
+    const renewalCause = new Error("renewal observation failed");
+    const renewalFailure = new Error(`Lost binding lease: ${key}`, { cause: renewalCause });
+    const owner = createNativeSessionBindingLeases(state, {
+      ...bindingTestOptions,
+      errors: {
+        ...bindingTestOptions.errors,
+        lostLease: (key, cause) =>
+          cause === renewalCause ? renewalFailure : bindingTestOptions.errors.lostLease(key),
+      },
+    });
+    const withCurrent = state.withCurrent.bind(state);
+    let failNextObservation = false;
+    state.withCurrent = (authority) => {
+      const store = withCurrent(authority);
+      return {
+        ...store,
+        async observe(key) {
+          if (failNextObservation) {
+            failNextObservation = false;
+            throw renewalCause;
+          }
+          return await store.observe(key);
+        },
+      };
+    };
+    const { promise: ownerStarted, resolve: started } = createDeferred();
+    const { promise: finishRun, resolve: finish } = createDeferred();
+    let assertRetainedLease!: () => void;
+    const expiresAt = Date.now() + bindingTestOptions.lease.staleMs;
+    const run = owner
+      .withLease(
+        key,
+        async () => {
+          assertRetainedLease = owner.captureLeaseAssertion(key);
+          failNextObservation = true;
+          started();
+          await finishRun;
+          assertRetainedLease();
+        },
+        { prepareLease: prepareBindingTestLease },
+      )
+      .catch((error: unknown) => error);
+    await ownerStarted;
+    try {
+      await vi.advanceTimersByTimeAsync(bindingTestOptions.lease.renewIntervalMs);
+      vi.setSystemTime(expiresAt - 1);
+      expect(assertRetainedLease).not.toThrow();
+      vi.setSystemTime(expiresAt);
+    } finally {
+      finish();
+      await run;
+    }
+    expect(await run).toBe(renewalFailure);
+  });
+
   it("rechecks a replacement row after comparison refusal", async () => {
     const { state, values, owner } = createLeaseFixture();
     values.set("binding", { value: "original" });

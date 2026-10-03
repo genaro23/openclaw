@@ -159,6 +159,13 @@ export async function runAgentsApiAttempt(
   };
   let native: ReturnType<typeof createAgentsApiSession> | undefined;
   let remoteSessionId = binding?.sessionId;
+  const logFailure = (message: string, error: unknown) =>
+    embeddedAgentLog.warn(message, {
+      error: formatErrorMessage(error),
+      runId: params.runId,
+      sessionId: params.sessionId,
+      nativeSessionId: remoteSessionId,
+    });
   let activeBinding = binding;
   const saveBinding = async (next: AgentsApiBinding) => {
     await bind(next);
@@ -451,8 +458,7 @@ export async function runAgentsApiAttempt(
       onSettled: beginSettlement,
       onReconcile: (turn, items) =>
         projection!.reconcile(turn, items, { presentation: !finalizingProjection }),
-      onUsageError: (error) =>
-        embeddedAgentLog.warn("Agents API token accounting unavailable", { error }),
+      onUsageError: (error) => logFailure("Agents API token accounting unavailable", error),
       onTranscriptOrderingGap: () => projection!.reportTranscriptOrderingGap(),
       onReconcileHistory: async (entries) => {
         for (const { turn, items } of entries) {
@@ -578,7 +584,7 @@ export async function runAgentsApiAttempt(
           ? { kind: "aborted", source: "runtime" }
           : { kind: "failed", source: "prompt", error };
     if (terminal.kind === "failed") {
-      embeddedAgentLog.warn("Agents API session failed", { error });
+      logFailure("Agents API session failed", error);
     }
   } finally {
     beginSettlement();
@@ -597,6 +603,7 @@ export async function runAgentsApiAttempt(
       // work settles under its API timeouts; early release could cancel a successor.
       await native?.close();
     } catch (error) {
+      logFailure("Agents API native cleanup failed", error);
       terminal = { kind: "failed", source: "prompt", error };
     }
     try {
@@ -606,6 +613,7 @@ export async function runAgentsApiAttempt(
         projection.recordUsage(params.model, turns);
       }
     } catch (error) {
+      logFailure("Agents API usage recording failed", error);
       terminal = { kind: "failed", source: "prompt", error };
     }
     if ((controller.signal.aborted || terminal.kind !== "ok") && native && projection) {
@@ -622,7 +630,7 @@ export async function runAgentsApiAttempt(
         try {
           await native.reconcileAfterClose(cleanupSignal);
         } catch (error) {
-          embeddedAgentLog.warn("Agents API terminal history reconciliation failed", { error });
+          logFailure("Agents API terminal history reconciliation failed", error);
         } finally {
           finalizingProjection = false;
           finalizingProjectionSignal = undefined;
@@ -632,6 +640,7 @@ export async function runAgentsApiAttempt(
     try {
       await racePromiseWithAbortSignal(projectionSettlement.drain(), cleanupSignal);
     } catch (error) {
+      logFailure("Agents API projection settlement failed", error);
       if (!controller.signal.aborted) {
         terminal = { kind: "failed", source: "prompt", error };
       }
@@ -650,7 +659,7 @@ export async function runAgentsApiAttempt(
       try {
         await cleanup("Agents API attempt settled");
       } catch (error) {
-        embeddedAgentLog.warn("Agents API tool cleanup failed", { error });
+        logFailure("Agents API tool cleanup failed", error);
       }
     }
     clearActiveEmbeddedRun(params.sessionId, handle, params.sessionKey, params.sessionFile);
