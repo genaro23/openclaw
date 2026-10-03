@@ -422,7 +422,8 @@ bytes. Samples link to nodes by `nodeId`.
 
 Heap and CPU profiles label dependency frames as `[dep:<pkg>]` with URL
 `node_modules/<pkg>`, including scoped packages and pnpm layouts; symbols,
-versions, filenames, and absolute paths stay hidden. Frames with script ID `0`,
+versions, filenames, and absolute paths stay hidden. URLs with query or fragment
+markers remain redacted. Frames with script ID `0`,
 an empty URL, and a negative line number use `[native]`, except for known V8
 engine labels such as `(root)`. This bucket identifies missing JavaScript source
 attribution, not a specific native allocator or external Buffer bytes. Other

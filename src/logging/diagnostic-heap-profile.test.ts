@@ -214,6 +214,12 @@ describe("diagnostic heap profile owner", () => {
     [{ scriptId: "0", url: "/private/user/secret.js", lineNumber: -1 }, "[redacted]"],
     [{ url: "/private/user/secret.js" }, "[redacted]"],
     [{ url: "https://private.example/node_modules/ws/secret.js" }, "[redacted]"],
+    [{ url: "/private/user/secret.js?next=/../node_modules/suffix-only/secret.js" }, "[redacted]"],
+    [{ url: "/private/user/secret.js#next=/node_modules/suffix-only/secret.js" }, "[redacted]"],
+    [
+      { url: "/fixture/openclaw/src/node_modules/ws/secret.js?next=/../suffix-only/secret.js" },
+      "[redacted]",
+    ],
     [{ url: "file:///private/node_modules/ws/secret.js?private=query" }, "[redacted]"],
     [{ url: "/private/node_modules/ws/../../user/secret.js" }, "[redacted]"],
     [{ url: "/private/node_modules/.pnpm/ws@8.18.0/secret.js" }, "[redacted]"],

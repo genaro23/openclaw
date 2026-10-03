@@ -62,17 +62,14 @@ function codeUrl(url: string, packageRoot: string | null): string | undefined {
   if (/^node:[a-zA-Z0-9_./-]+$/.test(url)) {
     return url;
   }
-  if (url.length > 2_048) {
+  // Path normalization can erase suffix segments containing parent traversals.
+  if (url.length > 2_048 || /[?#]/.test(url)) {
     return undefined;
   }
   let filename = url;
   if (url.startsWith("file:")) {
     try {
-      const parsed = new URL(url);
-      if (parsed.search || parsed.hash) {
-        return undefined;
-      }
-      filename = fileURLToPath(parsed);
+      filename = fileURLToPath(url);
     } catch {
       return undefined;
     }
