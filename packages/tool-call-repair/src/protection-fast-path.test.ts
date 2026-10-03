@@ -138,6 +138,7 @@ describe("protection fast path", () => {
     const chunkCount = 512;
     const totalChars = chunk.length * chunkCount;
     let searchedChars = 0;
+    // oxlint-disable-next-line typescript/unbound-method -- Invoked below with the original string receiver.
     const indexOf = String.prototype.indexOf;
     const searches = vi.spyOn(String.prototype, "indexOf").mockImplementation(function (
       this: string,

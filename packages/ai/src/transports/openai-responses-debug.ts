@@ -210,7 +210,7 @@ function isResponseFailedIdentifierKey(key: string): boolean {
   );
 }
 
-function collectResponseFailedIdentifierHashes(value: unknown): string[] {
+function collectResponseFailedIdentifierHashes(input: unknown): string[] {
   const out: string[] = [];
   const seen = new WeakSet<object>();
   const visit = (value: unknown, path: string, depth: number, identifierKey: string): void => {
@@ -235,11 +235,11 @@ function collectResponseFailedIdentifierHashes(value: unknown): string[] {
       }
     }
   };
-  visit(value, "", 0, "");
+  visit(input, "", 0, "");
   return out;
 }
 
-function redactResponseFailedDiagnosticValue(value: unknown): unknown {
+function redactResponseFailedDiagnosticValue(input: unknown): unknown {
   const seen = new WeakSet<object>();
   const redact = (value: unknown, key: string, depth: number): unknown => {
     if (typeof value === "string" || typeof value === "number") {
@@ -263,7 +263,7 @@ function redactResponseFailedDiagnosticValue(value: unknown): unknown {
     }
     return out;
   };
-  return redact(value, "", 0);
+  return redact(input, "", 0);
 }
 
 function buildResponsesFailedFailureFields(
