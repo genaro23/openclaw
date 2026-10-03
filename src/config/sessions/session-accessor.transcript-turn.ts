@@ -229,6 +229,7 @@ async function appendTranscriptTurnMessages(
       },
       {
         ...appendOptions,
+        ...appendOptions.workerPreparation,
         message: attachSessionTranscriptRunId(appendOptions.message, options.runId),
         ...((append.cwd ?? options.cwd) ? { cwd: append.cwd ?? options.cwd } : {}),
         ...((append.config ?? options.config) ? { config: append.config ?? options.config } : {}),
@@ -316,6 +317,8 @@ async function persistExpectedSessionTranscriptTurn(
         expectedWriterRunId:
           options.expectedWriterRunId ?? inheritedWriterFence?.expectedWriterRunId,
         expectedSessionState: options.expectedSessionState,
+        assertCurrent: options.assertCurrent,
+        acceptedResultGuard: options.acceptedResultGuard,
         expectedSessionId,
         initialSessionEntry: options.initialSessionEntry,
         atomicGroup: options.atomicGroup,
@@ -359,6 +362,7 @@ async function persistExpectedSessionTranscriptTurn(
   }
   return {
     sessionTurnMutationResult: turn.sessionTurnMutationResult,
+    predicateSkipped: turn.predicateSkipped,
     appendedCount: countAppendedTranscriptMessages(turn.appendedMessages),
     messages: turn.appendedMessages,
     sessionEntry: turn.sessionEntry ?? scope.sessionEntry,

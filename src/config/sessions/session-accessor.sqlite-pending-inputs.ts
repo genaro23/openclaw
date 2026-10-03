@@ -88,6 +88,7 @@ const workerCustody = resolveGlobalSingleton(
     new AsyncLocalStorage<{
       owner: SessionPendingInputOwner;
       assertCurrent(): void;
+      consumed: Set<string>;
     }>(),
 );
 
@@ -140,7 +141,7 @@ export function runWithSessionPendingInputWorkerCustody<T>(
     },
   });
   const owner = hydrate(facts);
-  const value = workerCustody.run({ owner, assertCurrent }, () =>
+  const value = workerCustody.run({ owner, assertCurrent, consumed: new Set() }, () =>
     owners.current.run(owner, () =>
       relocation === undefined
         ? run()
@@ -155,6 +156,22 @@ export function runWithSessionPendingInputWorkerCustody<T>(
         .filter((source) => source.consumed)
         .map((source) => source.inputId),
     },
+  };
+}
+
+/** Provisional worker facts; only the matching outer COMMIT may publish them on the host. */
+export function readSessionPendingInputWorkerReceipt(
+  database: PendingInputDatabase,
+): SessionPendingInputWorkerReceipt | undefined {
+  const custody = workerCustody.getStore();
+  if (!custody) {
+    return undefined;
+  }
+  return {
+    transcriptInputId:
+      owners.transactionRelocations.get(database.db)?.get(custody.owner) ??
+      custody.owner.transcriptInputId,
+    consumedInputIds: [...custody.consumed],
   };
 }
 
@@ -694,9 +711,21 @@ export function consumeSessionPendingInput(
     }
   }
   // Outer commit publishes this fact before observers; rollback leaves finish responsible.
+  const worker = workerCustody.getStore();
+  const newlyConsumed = consumedOwners.filter(
+    (candidate) => !worker?.consumed.has(candidate.inputId),
+  );
   stageSqliteTransactionState(database.db, {
-    stage: () => {},
-    rollback: () => {},
+    stage: () => {
+      for (const consumedOwner of newlyConsumed) {
+        worker?.consumed.add(consumedOwner.inputId);
+      }
+    },
+    rollback: () => {
+      for (const consumedOwner of newlyConsumed) {
+        worker?.consumed.delete(consumedOwner.inputId);
+      }
+    },
     commit: () => {
       for (const consumedOwner of consumedOwners) {
         consumedOwner.consumed = true;
