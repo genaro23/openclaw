@@ -58,6 +58,7 @@ export type WorkerEnvironmentServiceRecord = {
   state: WorkerEnvironmentState;
   ownerEpoch: number;
   createdAtMs: number;
+  stateChangedAtMs: number;
   idleSinceAtMs: number | null;
   destroyRequestedAtMs: number | null;
   attachedSessionIds: readonly string[];

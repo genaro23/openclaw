@@ -238,6 +238,7 @@ function placementContext(
               leaseId: null,
               sharedHost: null,
               createdAtMs: 100,
+              stateChangedAtMs: 100,
               idleSinceAtMs: null,
               destroyRequestedAtMs: null,
               attachedSessionIds: [],

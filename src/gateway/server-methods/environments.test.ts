@@ -68,6 +68,65 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("environment gateway methods", () => {
+  it("preserves lifecycle timestamps and diagnostic inventory for old finished workers", async () => {
+    const finished = workerRecord({
+      state: "destroyed",
+      createdAtMs: 1_000,
+      stateChangedAtMs: 2_000,
+      updatedAtMs: 3_000,
+    });
+    const service = workerService({
+      list: vi.fn(() => [finished]),
+      get: vi.fn(() => finished),
+    });
+    for (const now of [NOW, NOW + 24 * 60 * 60 * 1_000]) {
+      vi.mocked(Date.now).mockReturnValue(now);
+      const [listed, payload] = await call("environments.list", {}, { service });
+      expect(listed).toBe(true);
+      const worker = (payload as EnvironmentsListResult).environments.find(
+        (entry) => entry.id === finished.environmentId,
+      );
+      expect(worker?.worker).toMatchObject({
+        createdAtMs: 1_000,
+        stateChangedAtMs: 2_000,
+        ageMs: now - 1_000,
+        state: "destroyed",
+      });
+      const [found, status] = await call(
+        "environments.status",
+        { environmentId: finished.environmentId },
+        { service },
+      );
+      expect(found).toBe(true);
+      expect(status).toEqual(worker);
+    }
+  });
+
+  it("exposes pending cleanup without privileged prepared-worker details", async () => {
+    const pending = workerRecord({
+      state: "failed",
+      leaseId: null,
+      destroyRequestedAtMs: 2_000,
+    });
+    const [ok, payload] = await call(
+      "environments.list",
+      {},
+      {
+        service: workerService({ list: vi.fn(() => [pending]) }),
+      },
+    );
+    expect(ok).toBe(true);
+    const worker = (payload as EnvironmentsListResult).environments.find(
+      (entry) => entry.id === pending.environmentId,
+    )?.worker;
+    expect(worker).toMatchObject({ state: "failed", cleanupPending: true });
+    expect(worker).not.toHaveProperty("destroyRequestedAtMs");
+    expect(
+      summarizeWorkerEnvironment(workerRecord({ state: "destroyed", destroyRequestedAtMs: 2_000 }))
+        .worker,
+    ).toMatchObject({ cleanupPending: false });
+  });
+
   it("probes disabled host setup only when requested without advertising or granting desktop access", async () => {
     const probe = vi.spyOn(rfbProbe, "probeRfbServer").mockResolvedValue({
       kind: "rfb",

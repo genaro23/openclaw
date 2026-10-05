@@ -114,8 +114,23 @@ choices stay in place when you leave Systems and return on the same connection.
 The machine list groups non-terminal cloud workers under **Active workers** and
 provider-reported destroyed or failed workers under **Recent worker history**.
 Workers awaiting cleanup remain active and inspectable until they reach a
-terminal state. Retained history stays visible after reclaim or session archive
-while the canonical environment inventory still reports it. Archiving stops
+terminal state. Finished workers leave the sidebar and mobile picker after 15
+minutes by default, measured from their last lifecycle transition. Use **Clear
+finished workers after** to choose 10, 15, 30, or 60 minutes. Select a finished
+worker, open **Machine details**, and choose **Clear from sidebar** to dismiss it
+immediately. Failed workers with a retained lease or pending cleanup stay visible.
+**Show retained worker history** reveals expired and dismissed entries while the
+canonical environment inventory still retains them. These controls hide rows;
+they do not reclaim resources or delete diagnostic history.
+
+Worker names combine a task or session name with their local start date and time.
+Standalone workers without a task name show **Worker** plus their start time.
+Edit **Worker name** in Machine details to give one a recognizable name, such as
+**CAD — Clearance coupon**. Names, dismissals, and the cleanup interval sync across
+clients signed into the same Gateway profile. Preference storage is bounded;
+a save that cannot fit reports an error instead of silently losing existing names.
+
+Archiving stops
 running cloud workers through the normal workspace-reconciliation flow; failed
 placements keep their existing cleanup retries and recovery history.
 

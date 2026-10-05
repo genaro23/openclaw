@@ -58,6 +58,7 @@ const injectedWorkerService = vi.hoisted(() => {
         state: "ready",
         ownerEpoch: 1,
         createdAtMs: 1_800_000_000_000,
+        stateChangedAtMs: 1_800_000_000_000,
         idleSinceAtMs: null,
         destroyRequestedAtMs: null,
         attachedSessionIds: [],

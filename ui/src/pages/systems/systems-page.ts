@@ -12,7 +12,7 @@ import type { SparklineSample } from "../../components/sparkline-tile.ts";
 import { t } from "../../i18n/index.ts";
 import { registerSystemsEnglish } from "../../i18n/locales/en-systems.ts";
 import { formatDurationHuman } from "../../lib/format-duration.ts";
-import { formatByteSize, formatTimeAgo } from "../../lib/format.ts";
+import { formatByteSize, formatTimeAgo, formatMs } from "../../lib/format.ts";
 import { shouldHandleNavigationClick } from "../../lib/navigation-click.ts";
 import {
   resolveSessionPreferredFace,
@@ -25,7 +25,13 @@ import { renderSystemsBackups } from "./systems-backups.ts";
 import { SystemsController } from "./systems-controller.ts";
 import type { SystemsRouteData } from "./systems-controller.ts";
 import type { SystemsInventoryRow } from "./systems-data.ts";
-import { systemKind, systemName, systemPlatform, systemStatus } from "./systems-sidebar.ts";
+import {
+  systemKind,
+  systemName,
+  systemTaskName,
+  systemPlatform,
+  systemStatus,
+} from "./systems-sidebar.ts";
 import {
   SYSTEMS_GATEWAY_STALE_MS,
   SYSTEMS_NODE_STALE_MS,
@@ -240,6 +246,18 @@ class SystemsPage extends OpenClawLightDomElement {
           ${icons.x}
         </button>
       </header>
+      ${
+        controller.canDismissWorker(row)
+          ? html`<button
+              type="button"
+              class="systems-text-button"
+              ?disabled=${controller.workerHistoryBusy}
+              @click=${() => void controller.dismissWorker(environment.id)}
+            >
+              ${t(controller.workerHistoryBusy ? "systems.clearingWorker" : "systems.clearWorker")}
+            </button>`
+          : nothing
+      }
       <dl>
         <dt>${t("systems.identifier")}</dt>
         <dd>${environment.id}</dd>
@@ -251,7 +269,46 @@ class SystemsPage extends OpenClawLightDomElement {
       ${
         environment.worker
           ? html`<h3>${t("systems.workerDetails")}</h3>
+              ${keyed(
+                environment.id,
+                html`<form
+                  class="systems-worker-name"
+                  @submit=${(event: SubmitEvent) => {
+                    event.preventDefault();
+                    const form = event.currentTarget;
+                    if (form instanceof HTMLFormElement) {
+                      const name = new FormData(form).get("workerName");
+                      if (typeof name === "string") {
+                        void controller.renameWorker(environment.id, name);
+                      }
+                    }
+                  }}
+                >
+                  <label for="systems-worker-name">${t("systems.workerName")}</label>
+                  <input
+                    id="systems-worker-name"
+                    name="workerName"
+                    maxlength="80"
+                    .value=${systemTaskName(row, controller.workerName(environment.id))}
+                    ?disabled=${!controller.canEditWorkerPreferences || controller.workerHistoryBusy}
+                  />
+                  <button
+                    type="submit"
+                    class="systems-text-button"
+                    ?disabled=${!controller.canEditWorkerPreferences || controller.workerHistoryBusy}
+                  >
+                    ${t("systems.saveWorkerName")}
+                  </button>
+                  <p class="systems-detail-hint">${t("systems.workerNameHint")}</p>
+                </form>`,
+              )}
               <dl class="systems-worker-details">
+                ${
+                  environment.worker.createdAtMs === undefined
+                    ? nothing
+                    : html`<dt>${t("systems.workerStarted")}</dt>
+                        <dd>${formatMs(environment.worker.createdAtMs)}</dd>`
+                }
                 <dt>${t("systems.status")}</dt>
                 <dd>${systemStatus(row)}</dd>
                 <dt>${t("systems.provider")}</dt>
@@ -276,7 +333,7 @@ class SystemsPage extends OpenClawLightDomElement {
                         <dd class="systems-worker-error">${workerError}</dd>`
                     : nothing
                 }
-              </dl>`
+              </dl> `
           : nothing
       }
       <h3>${t("systems.telemetry")}</h3>
@@ -390,7 +447,9 @@ class SystemsPage extends OpenClawLightDomElement {
       controller.desktopAvailable &&
       this.presented,
     );
-    const title = row ? systemName(row) : t("systems.title");
+    const title = row
+      ? systemName(row, controller.workerName(row.environment.id))
+      : t("systems.title");
     const auxiliaryErrors = Object.values(controller.inventory?.errors ?? {});
     const emptyTitle = !controller.connected
       ? t("systems.offlineGateway")
@@ -436,8 +495,14 @@ class SystemsPage extends OpenClawLightDomElement {
             }
           }}
         >
-          <option value="" disabled .selected=${!row}>${t("systems.select")}</option>
-          ${controller.rows.map((entry) => html`<option value=${entry.environment.id} .selected=${entry.environment.id === controller.selectedId}>${systemName(entry)}</option>`)}
+          <option
+            value=""
+            disabled
+            .selected=${!controller.visibleRows.some((entry) => entry.environment.id === controller.selectedId)}
+          >
+            ${t("systems.select")}
+          </option>
+          ${controller.visibleRows.map((entry) => html`<option value=${entry.environment.id} .selected=${entry.environment.id === controller.selectedId}>${systemName(entry, controller.workerName(entry.environment.id))}</option>`)}
         </select>
         <button
           class="systems-icon-button"
@@ -459,6 +524,32 @@ class SystemsPage extends OpenClawLightDomElement {
           ${icons.panelRightOpen}
         </button>
       </header>
+      <div class="systems-history-controls">
+        <button
+          type="button"
+          class="systems-text-button"
+          aria-pressed=${controller.showWorkerHistory}
+          @click=${() => controller.toggleWorkerHistory()}
+        >
+          ${t(controller.showWorkerHistory ? "systems.hideWorkerHistory" : "systems.showWorkerHistory")}
+        </button>
+        <label
+          >${t("systems.workerHistoryRetention")}
+          <select
+            aria-label=${t("systems.workerHistoryRetention")}
+            ?disabled=${!controller.canEditWorkerPreferences || controller.workerHistoryBusy}
+            @change=${(event: Event) => {
+              if (event.currentTarget instanceof HTMLSelectElement) {
+                void controller.setHistoryRetentionMinutes(Number(event.currentTarget.value));
+              }
+            }}
+          >
+            ${[10, 15, 30, 60].map((minutes) => html`<option value=${minutes} .selected=${controller.historyRetentionMinutes === minutes}>${t("systems.retentionMinutes", { count: String(minutes) })}</option>`)}
+          </select>
+        </label>
+      </div>
+      ${controller.workerHistoryError ? html`<div class="systems-callout systems-callout--error" role="alert">${controller.workerHistoryError}</div>` : nothing}
+      ${controller.showWorkerHistory ? html`<p class="systems-history-hint">${t("systems.workerHistoryHint")}</p>` : nothing}
       ${controller.error ? html`<div class="systems-callout systems-callout--error" role="alert">${controller.error}<button @click=${() => void controller.refresh("manual")} ?disabled=${controller.loading}>${t("common.retry")}</button></div>` : nothing}
       ${!controller.connected ? html`<div class="systems-callout" role="status">${t("systems.offlineGateway")}</div>` : nothing}
       ${

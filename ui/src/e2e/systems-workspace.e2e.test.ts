@@ -4,6 +4,7 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Page } from "playwright";
 import { expect, it } from "vitest";
 import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
+import type { MockGatewayWindow } from "../test-helpers/control-ui-e2e-contract.ts";
 import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiSessionRow } from "../test-helpers/control-ui-session-fixtures.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
@@ -81,6 +82,115 @@ function installSystemsGateway(
 }
 
 suite.define(() => {
+  it("cleans up finished workers, saves friendly names, and exposes retained history on mobile", async () => {
+    const artifacts = createControlUiE2eArtifactDir("worker-sidebar-polish");
+    const now = Date.now();
+    const started = new Date(now);
+    started.setHours(10, 0, 0, 0);
+    const worker = (id: string, state: "destroyed" | "ready", ended: number) => ({
+      id,
+      type: "worker",
+      status: state === "ready" ? "available" : "unavailable",
+      worker: {
+        state,
+        providerId: "crabbox",
+        profileId: "cad",
+        ageMs: now - started.getTime(),
+        createdAtMs: started.getTime(),
+        stateChangedAtMs: ended,
+        attachedSessionIds: [],
+        tunnelStatus: "stopped",
+      },
+    });
+    await suite.withPage(
+      { viewport: { width: 1440, height: 900 }, locale: "en-US", timezoneId: "America/Chicago" },
+      async ({ page }) => {
+        const gateway = await installMockGateway(page, {
+          presenceUsers: [{ id: "worker-proof-user", name: "Owner", self: true }],
+          featureMethods: [
+            "environments.list",
+            "node.list",
+            "system.info",
+            "users.prefs.get",
+            "users.prefs.set",
+          ],
+          methodResponses: {
+            "users.prefs.get": { status: "ok", entries: {} },
+            "environments.list": {
+              environments: [
+                { id: "gateway", type: "local", label: "Gateway machine", status: "available" },
+                { ...worker("worker-active", "ready", now), label: "CAD — Clearance coupon" },
+                { ...worker("worker-recent", "destroyed", now - 60_000), label: "CAD — Fit check" },
+                {
+                  ...worker("worker-old", "destroyed", now - 16 * 60_000),
+                  label: "CAD — Previous run",
+                },
+              ],
+            },
+            "node.list": { nodes: [] },
+            "backup.status": { targets: [], schedules: [], locations: [] },
+          },
+        });
+        await page.goto(suite.server.baseUrl + "systems");
+        await gateway.waitForRequest("environments.list");
+        await page.evaluate(() => {
+          const mock = (window as MockGatewayWindow).openclawControlUiE2eGateway!;
+          let entries: Record<string, unknown> = {};
+          mock.setRequestHandler("users.prefs.get", ({ respond }) =>
+            respond({ status: "ok", entries }),
+          );
+          mock.setRequestHandler("users.prefs.set", ({ params, respond, emit }) => {
+            const patch = (params as { entries: Record<string, unknown> }).entries;
+            entries = { ...entries, ...patch };
+            respond({ status: "ok" });
+            emit("users.prefs.changed", {
+              profileId: "worker-proof-user",
+              keys: Object.keys(patch),
+            });
+          });
+        });
+        const sidebar = page.locator(".systems-sidebar");
+        await expect.poll(() => sidebar.locator(".systems-machine").count()).toBe(3);
+        await sidebar.getByRole("button", { name: /CAD — Clearance coupon/ }).click();
+        await expect
+          .poll(() => page.locator(".systems-heading h1").textContent())
+          .toContain("Today,");
+        await page.getByRole("button", { name: "Machine details", exact: true }).first().click();
+        await page.getByLabel("Worker name", { exact: true }).fill("CAD — Bracket prototype");
+        await page.getByRole("button", { name: "Save name", exact: true }).click();
+        await expect
+          .poll(() => page.locator(".systems-heading h1").textContent())
+          .toContain("CAD — Bracket prototype");
+        await page.screenshot({ path: path.join(artifacts, "desktop-friendly-worker.png") });
+        await sidebar.getByRole("button", { name: /CAD — Fit check/ }).click();
+        await page.screenshot({ path: path.join(artifacts, "desktop-clear-control.png") });
+        await page.getByRole("button", { name: "Clear from sidebar", exact: true }).click();
+        await expect.poll(() => sidebar.locator(".systems-machine").count()).toBe(2);
+        expect((await gateway.getRequests("users.prefs.set")).length).toBe(2);
+        await page.screenshot({ path: path.join(artifacts, "desktop-cleared-history.png") });
+        await page.setViewportSize({ width: 390, height: 844 });
+        const picker = page.locator(".systems-mobile-picker");
+        await picker.selectOption("worker-active");
+        await expect.poll(() => picker.locator("option").count()).toBe(3);
+        await page
+          .getByRole("button", { name: "Show retained worker history", exact: true })
+          .click();
+        await expect.poll(() => picker.locator("option").count()).toBe(5);
+        await picker.selectOption("worker-recent");
+        await page.screenshot({ path: path.join(artifacts, "mobile-retained-history.png") });
+        await page
+          .getByRole("button", { name: "Hide retained worker history", exact: true })
+          .click();
+        await page.getByLabel("Clear finished workers after", { exact: true }).selectOption("30");
+        await expect.poll(() => picker.locator("option").count()).toBe(4);
+        expect(await picker.locator('option[value="worker-recent"]').count()).toBe(0);
+        await expect
+          .poll(() => gateway.getRequests("users.prefs.set").then((rows) => rows.length))
+          .toBe(3);
+      },
+    );
+  });
+
   it("shows backup health on the landing and Gateway host views and probes configured storage", async () => {
     const artifacts = createControlUiE2eArtifactDir("systems-backups");
     await suite.withPage(

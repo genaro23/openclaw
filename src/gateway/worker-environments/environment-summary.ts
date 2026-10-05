@@ -74,6 +74,9 @@ export function summarizeWorkerEnvironment(
       ...(options.includePreparedDetails && record.destroyRequestedAtMs !== null
         ? { destroyRequestedAtMs: record.destroyRequestedAtMs }
         : {}),
+      createdAtMs: record.createdAtMs,
+      stateChangedAtMs: record.stateChangedAtMs,
+      cleanupPending,
       ageMs: Math.max(0, Math.trunc(now - record.createdAtMs)),
       ...(record.state === "idle" && record.idleSinceAtMs !== null
         ? { idleMs: Math.max(0, Math.trunc(now - record.idleSinceAtMs)) }

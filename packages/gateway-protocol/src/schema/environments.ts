@@ -120,6 +120,11 @@ export const WorkerEnvironmentMetadataSchema = closedObject({
   /** Dedicated enrolled node that reports this worker machine's host telemetry. */
   nodeId: Type.Optional(NonEmptyString),
   state: WorkerEnvironmentStateSchema,
+  /** Stable timestamps for friendly names and terminal-history presentation. */
+  createdAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  stateChangedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** Cleanup still owns this worker even when allocation has failed. */
+  cleanupPending: Type.Optional(Type.Boolean()),
   ageMs: Type.Integer({ minimum: 0 }),
   idleMs: Type.Optional(Type.Integer({ minimum: 0 })),
   destroyRequestedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),

@@ -113,6 +113,7 @@ function workerRecord(): WorkerEnvironmentServiceRecord {
     state: "requested",
     ownerEpoch: 1,
     createdAtMs: 1_000,
+    stateChangedAtMs: 1_000,
     idleSinceAtMs: null,
     destroyRequestedAtMs: null,
     attachedSessionIds: ["session-sdk-e2e"],

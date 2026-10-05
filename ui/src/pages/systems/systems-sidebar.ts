@@ -5,6 +5,7 @@ import { icons } from "../../components/icons.ts";
 import { syncDropdownItemRadio } from "../../components/web-awesome.ts";
 import { t } from "../../i18n/index.ts";
 import { registerSystemsEnglish } from "../../i18n/locales/en-systems.ts";
+import { createMsFormatter } from "../../lib/format.ts";
 import { prettifyPlatform } from "../../lib/platform-label.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
@@ -44,30 +45,57 @@ function renderMenuOption(value: string, label: string, checked: boolean) {
   </wa-dropdown-item>`;
 }
 
-export function systemName(row: SystemsInventoryRow): string {
-  const named = row.gatewaySystemInfo?.machineName ?? row.environment.label;
-  if (named) {
-    return named;
+export function systemTaskName(row: SystemsInventoryRow, override?: string): string {
+  if (row.environment.worker) {
+    const placed = row.sessions.find(
+      (relation) => relation.kind === "placement" || relation.kind === "retained-placement",
+    )?.session;
+    return (
+      override?.trim() ||
+      row.environment.label?.trim() ||
+      placed?.displayName?.trim() ||
+      placed?.label?.trim() ||
+      t("systems.worker")
+    );
   }
-  if (row.environment.id === "gateway") {
-    return t("systems.host");
+  return (
+    row.gatewaySystemInfo?.machineName ??
+    row.environment.label ??
+    (row.environment.id === "gateway"
+      ? t("systems.host")
+      : (row.node?.displayName ?? row.environment.id))
+  );
+}
+
+export function systemStartedLabel(row: SystemsInventoryRow, now = Date.now()): string | undefined {
+  const created = row.environment.worker?.createdAtMs;
+  if (created === undefined) {
+    return undefined;
   }
-  const worker = row.environment.worker;
-  if (worker) {
-    // A worker is best known by the session placed on it; otherwise by its
-    // provider profile, matching the chat placement label.
-    const placed = row.sessions.find((relation) => relation.kind === "placement")?.session;
-    if (placed) {
-      return placed.displayName ?? placed.label ?? placed.key;
-    }
-    if (worker.profileId) {
-      return `${worker.providerId} · ${worker.profileId}`;
-    }
+  const date = new Date(created);
+  if (!Number.isFinite(date.getTime())) {
+    return undefined;
   }
-  if (row.node?.displayName) {
-    return row.node.displayName;
-  }
-  return row.environment.id;
+  const today = new Date(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const day =
+    date.toDateString() === today.toDateString()
+      ? t("systems.today")
+      : date.toDateString() === yesterday.toDateString()
+        ? t("systems.yesterday")
+        : createMsFormatter({
+            month: "short",
+            day: "numeric",
+            ...(date.getFullYear() !== today.getFullYear() ? ({ year: "numeric" } as const) : {}),
+          })(created);
+  return `${day}, ${createMsFormatter({ hour: "numeric", minute: "2-digit" })(created)}`;
+}
+
+export function systemName(row: SystemsInventoryRow, override?: string): string {
+  const name = systemTaskName(row, override);
+  const started = systemStartedLabel(row);
+  return started ? `${name} · ${started}` : name;
 }
 
 export function systemKind(row: SystemsInventoryRow): "host" | "worker" | "node" {
@@ -115,7 +143,9 @@ class SystemsSidebar extends OpenClawLightDomElement {
       return nothing;
     }
     const query = controller.query.trim().toLocaleLowerCase();
-    const rows = controller.rows
+    const name = (row: SystemsInventoryRow) =>
+      systemName(row, controller.workerName(row.environment.id));
+    const rows = controller.visibleRows
       .filter((row) => {
         const matchesStatus =
           controller.statusFilter === "all" ||
@@ -124,7 +154,7 @@ class SystemsSidebar extends OpenClawLightDomElement {
         return (
           matchesStatus &&
           [
-            systemName(row),
+            name(row),
             row.environment.id,
             systemPlatform(row) ?? "",
             row.environment.platform ?? row.node?.platform ?? "",
@@ -146,7 +176,7 @@ class SystemsSidebar extends OpenClawLightDomElement {
           }
         }
         return (
-          systemName(a).localeCompare(systemName(b), undefined, {
+          name(a).localeCompare(name(b), undefined, {
             numeric: true,
             sensitivity: "base",
           }) || a.environment.id.localeCompare(b.environment.id)
@@ -165,7 +195,12 @@ class SystemsSidebar extends OpenClawLightDomElement {
         @click=${() => controller.select(row.environment.id)}
       >
         <i class="systems-machine__dot" aria-hidden="true"></i>
-        <span class="systems-machine__name">${systemName(row)}</span>
+        <span class="systems-machine__identity" title=${name(row)}>
+          <span class="systems-machine__name"
+            >${systemTaskName(row, controller.workerName(row.environment.id))}</span
+          >
+          ${systemStartedLabel(row) ? html`<span class="systems-machine__started">${systemStartedLabel(row)}</span>` : nothing}
+        </span>
         <span class="systems-machine__meta"
           >${row.environment.worker ? status : !online ? status : (platform ?? nothing)}</span
         >

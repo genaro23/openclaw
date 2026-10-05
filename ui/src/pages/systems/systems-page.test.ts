@@ -24,7 +24,7 @@ import {
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { SystemsController } from "./systems-controller.ts";
 import "./systems-page.ts";
-import "./systems-sidebar.ts";
+import { systemName } from "./systems-sidebar.ts";
 
 setupSidebarTest();
 const runtimeConfigs: ReturnType<typeof createRuntimeConfigCapability>[] = [];
@@ -981,5 +981,52 @@ describe("Systems workspace", () => {
     expect(controller.rows).toEqual([]);
     expect(controller.selected).toBeUndefined();
     controller.setPresented(false);
+  });
+});
+
+describe("worker task and start-time labels", () => {
+  it("keeps task names and local start times stable across telemetry samples and retained placement", () => {
+    const now = new Date(2026, 9, 5, 12, 0).getTime();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const createdAtMs = new Date(2026, 9, 5, 10, 0).getTime();
+    const row = {
+      environment: {
+        id: "worker:cad",
+        type: "worker" as const,
+        status: "unavailable" as const,
+        worker: {
+          state: "destroyed" as const,
+          providerId: "crabbox",
+          profileId: "generic-profile",
+          createdAtMs,
+          stateChangedAtMs: now,
+          ageMs: now - createdAtMs,
+          attachedSessionIds: [],
+          tunnelStatus: "stopped" as const,
+        },
+      },
+      sessions: [
+        {
+          kind: "retained-placement" as const,
+          session: {
+            key: "agent:main:cad",
+            sessionId: "cad",
+            kind: "direct" as const,
+            updatedAt: now,
+            displayName: "CAD — Clearance coupon",
+          },
+        },
+      ],
+    };
+    expect(systemName(row)).toMatch(/^CAD — Clearance coupon · Today, /u);
+    const label = systemName(row);
+    row.environment.worker.ageMs += 60_000;
+    expect(systemName(row)).toBe(label);
+    expect(systemName(row, "CAD — Bracket")).toMatch(/^CAD — Bracket · Today, /u);
+    vi.mocked(Date.now).mockReturnValue(new Date(2026, 9, 6, 0, 1).getTime());
+    expect(systemName(row)).toMatch(/^CAD — Clearance coupon · Yesterday, /u);
+    row.sessions = [];
+    expect(systemName(row)).toMatch(/^Worker · Yesterday, /u);
+    expect(systemName(row)).not.toContain("generic-profile");
   });
 });

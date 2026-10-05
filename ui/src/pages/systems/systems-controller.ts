@@ -5,6 +5,7 @@ import type { ApplicationContext } from "../../app/context.ts";
 import { gatewayPresentationScope } from "../../app/gateway-presentation-scope.ts";
 import { hasOperatorReadAccess } from "../../app/operator-access.ts";
 import { isDesktopPanelAvailable } from "../../app/panel-availability.ts";
+import { invalidateUserPreferences } from "../../app/user-prefs-cache.ts";
 import { t } from "../../i18n/index.ts";
 import { resolveEditableSnapshotConfig } from "../../lib/config/config-state-model.ts";
 import { formatUiError } from "../../lib/format-error.ts";
@@ -23,36 +24,14 @@ import {
   systemMeasurements,
   type SystemsTelemetrySample,
 } from "./systems-telemetry.ts";
+import {
+  isWorkerHistoryVisible,
+  isWorkerPlacementSessionEvent,
+  workerPlacementInventoryKey,
+} from "./systems-worker-history.ts";
+import { SystemsWorkerPreferences } from "./systems-worker-preferences.ts";
 
 const TELEMETRY_SAMPLE_LIMIT = 120;
-
-function isWorkerPlacementSessionEvent(payload: unknown): boolean {
-  if (!isRecord(payload)) {
-    return false;
-  }
-  return payload.reason === "placement" || payload.reason === "reclaim";
-}
-
-function workerPlacementInventoryKey(context: ApplicationContext): string {
-  return (context.sessions.state.result?.sessions ?? [])
-    .flatMap((session) => {
-      const placement = session.placement;
-      if (!placement || placement.state === "local" || placement.state === "requested") {
-        return [];
-      }
-      return [
-        [
-          session.key,
-          placement.generation,
-          placement.state,
-          placement.environmentId ?? "",
-          placement.stateChangedAtMs,
-        ].join("\u0000"),
-      ];
-    })
-    .toSorted()
-    .join("\u0001");
-}
 
 export type SystemsSortMode = "name" | "online-first" | "offline-first";
 export type SystemsStatusFilter = "all" | "online" | "offline";
@@ -66,6 +45,9 @@ export class SystemsController {
   query = "";
   sortMode: SystemsSortMode = "online-first";
   statusFilter: SystemsStatusFilter = "all";
+  showWorkerHistory = false;
+  private readonly workerPreferences;
+  private workerHistoryTimer: ReturnType<typeof setInterval> | undefined;
   showStats = true;
   showDetails = false;
   loading = false;
@@ -93,6 +75,15 @@ export class SystemsController {
   constructor(readonly context: ApplicationContext) {
     this.scope = gatewayPresentationScope(context.gateway);
     this.lifecycle = createGatewayConnectionLifecycle(context.gateway.snapshot);
+    this.workerPreferences = new SystemsWorkerPreferences({
+      context,
+      lifecycle: this.lifecycle,
+      presented: () => this.presented,
+      current: () => this.current,
+      connected: () => this.connected,
+      rows: () => this.rows,
+      notify: () => this.notify(),
+    });
     this.eventRefresh = createSessionEventRefreshCoordinator({
       active: false,
       refresh: async (isCurrent) => {
@@ -123,6 +114,54 @@ export class SystemsController {
     return this.current
       ? this.rows.find((row) => row.environment.id === this.selectedId)
       : undefined;
+  }
+
+  get visibleRows(): SystemsInventoryRow[] {
+    return this.current
+      ? this.rows.filter(
+          (row) =>
+            this.showWorkerHistory ||
+            isWorkerHistoryVisible(
+              row,
+              this.workerPreferences.workerPresentations,
+              this.historyRetentionMinutes,
+              Date.now(),
+            ),
+        )
+      : [];
+  }
+
+  get historyRetentionMinutes() {
+    return this.workerPreferences.historyRetentionMinutes;
+  }
+  get workerHistoryBusy() {
+    return this.workerPreferences.workerHistoryBusy;
+  }
+  get workerHistoryError() {
+    return this.workerPreferences.workerHistoryError;
+  }
+  get canEditWorkerPreferences() {
+    return this.workerPreferences.canEditWorkerPreferences;
+  }
+  workerName(id: string) {
+    return this.workerPreferences.workerName(id);
+  }
+  canDismissWorker(row: SystemsInventoryRow) {
+    return this.workerPreferences.canDismissWorker(row);
+  }
+  dismissWorker(id: string) {
+    return this.workerPreferences.dismissWorker(id);
+  }
+  renameWorker(id: string, name: string) {
+    return this.workerPreferences.renameWorker(id, name);
+  }
+  setHistoryRetentionMinutes(value: number) {
+    return this.workerPreferences.setHistoryRetentionMinutes(value);
+  }
+
+  toggleWorkerHistory(): void {
+    this.showWorkerHistory = !this.showWorkerHistory;
+    this.notify();
   }
 
   get hostDesktopEnabled(): boolean {
@@ -405,6 +444,9 @@ export class SystemsController {
     }
     this.presented = presented;
     if (!presented) {
+      clearInterval(this.workerHistoryTimer);
+      this.workerHistoryTimer = undefined;
+      this.workerPreferences.cancel();
       for (const unsubscribe of this.subscriptions) {
         unsubscribe();
       }
@@ -415,11 +457,21 @@ export class SystemsController {
       this.resetDesktopSetup();
       return;
     }
+    this.workerHistoryTimer = setInterval(() => this.notify(), 15_000);
+    this.workerPreferences.resetWorkerPreferences();
+    void this.workerPreferences.loadWorkerPreferences();
     this.eventRefresh.setActive(true);
     this.workerPlacementKey = workerPlacementInventoryKey(this.context);
     this.subscriptions = [
       this.context.gateway.subscribe((snapshot) => {
         const changed = this.lifecycle.transition(snapshot);
+        if (
+          changed ||
+          this.workerPreferences.workerPreferencesProfile !== (snapshot.selfUser?.id ?? null)
+        ) {
+          this.workerPreferences.resetWorkerPreferences();
+          void this.workerPreferences.loadWorkerPreferences();
+        }
         if (!this.current) {
           this.clear();
         } else if (changed) {
@@ -443,6 +495,14 @@ export class SystemsController {
         this.notify();
       }),
       this.context.gateway.subscribeEvents((event) => {
+        // Routed to this identity by the server; payload may name its canonical alias.
+        if (event.event === "users.prefs.changed") {
+          const client = this.context.gateway.snapshot.client;
+          if (client) {
+            invalidateUserPreferences(client);
+          }
+          void this.workerPreferences.loadWorkerPreferences();
+        }
         if (event.event === "config.changed") {
           this.cancelBackups();
           this.storageProbes.clear();
@@ -506,6 +566,7 @@ export class SystemsController {
   }
 
   private clear(): void {
+    this.workerPreferences.resetWorkerPreferences();
     this.cancelRefresh();
     this.cancelBackups();
     this.backups = null;
