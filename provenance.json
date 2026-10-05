@@ -1,0 +1,8 @@
+{
+  "base": "bb3a8a9ac304fbec8367fd64d9644bb12d956e9c",
+  "head": "cbc3e2731fb7b1cdf8eb3705aec5212f4451149b",
+  "source": "apps/ios/Sources/RootTabsNavigation.swift",
+  "old_sha256": "f2ee777038d8f2f5b97cd4bd7a888fe9e356f617f562a621af8a3230b1e7034d",
+  "new_sha256": "72609a16f4742a4019c5624ed7e19c58739e3a1dd71e66f7d0d3fff58ebdd514",
+  "method": "Compile exact extracted production preference methods and destination sets; not a full app test."
+}

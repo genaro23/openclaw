@@ -1,0 +1,1 @@
+PASS: 32962 saved-layout differential + round-trip cases; 16384 subsets, forward/reverse ordering, all ordered pairs, edge cases; 3 intentional default cases; explicit Systems opt-in.
