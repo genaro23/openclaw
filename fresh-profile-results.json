@@ -1,0 +1,15 @@
+{
+  "checks": {
+    "freshProfileHasNoFeaturePreferences": true,
+    "freshProfileDefaultsTo15Minutes": true,
+    "freshProfileWriterPersistsAcrossReload": true,
+    "ownedGatewayStopped": true,
+    "disposableStateRemoved": true
+  },
+  "limits": [
+    "No production state, service, plugin links, or ports modified.",
+    "Uses retained installed parent/candidate binaries; no resource/provider operations.",
+    "Fresh isolated candidate profile; no synthetic worker row needed."
+  ],
+  "head": "079f019294fb87175e6f7371f0d5facb0e0df6a8"
+}

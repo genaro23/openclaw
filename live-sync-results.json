@@ -1,0 +1,18 @@
+{
+  "head": "079f019294fb87175e6f7371f0d5facb0e0df6a8",
+  "checks": {
+    "sameDurableProfile": true,
+    "distinctAuthenticatedDevices": true,
+    "renameSynchronizes": true,
+    "retentionSynchronizes": true,
+    "dismissalSynchronizes": true,
+    "clientReloadPersists": true,
+    "unrelatedPreferencesUnchanged": true,
+    "originalSettingsRestored": true
+  },
+  "limits": [
+    "Production Gateway was not restarted or upgraded.",
+    "Two separate Chromium contexts, not native clients.",
+    "Real existing terminal worker; no worker resource operations."
+  ]
+}

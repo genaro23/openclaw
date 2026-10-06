@@ -1,0 +1,20 @@
+{
+  "checks": {
+    "oldBuildPairedClientsAndExistingPreference": true,
+    "upgradePreservesProfileDevicesAndAllExistingPreferences": true,
+    "existingProfileReceivesDefaultWithoutPreferenceRewrite": true,
+    "upgradedPairedClientsSynchronizeNewPreference": true,
+    "realWriterPersistsNameAndDismissalForSyntheticUiRow": true,
+    "newPreferenceAndUnrelatedDataSurviveGatewayRestart": true,
+    "nameAndDismissalSurviveGatewayRestart": true,
+    "ownedGatewayStopped": true,
+    "disposableStateRemoved": true
+  },
+  "limits": [
+    "No production state, service, plugin links, or ports modified.",
+    "Uses retained installed parent/candidate binaries; no resource/provider operations.",
+    "One synthetic UI inventory row exercises name/dismissal via the unchanged real controller writer; preference RPC/store are not mocked."
+  ],
+  "base": "5cfbf3932db1c714e1196cba404aedb186927ba2",
+  "head": "079f019294fb87175e6f7371f0d5facb0e0df6a8"
+}
