@@ -1,0 +1,24 @@
+{
+  "candidateHead": "079f019294fb87175e6f7371f0d5facb0e0df6a8",
+  "platform": "Ubuntu 26.04 LTS x86_64",
+  "nativeApp": "Published OpenClaw Linux 2026.9.5 (Tauri / WebKitGTK)",
+  "nativeDebSha256": "50f6b41cad983c1826f9a07a34c062053a9eaf2b3f38a0e669891f1b4cbc457f",
+  "webkitGTK": "2.52.6",
+  "checks": {
+    "realNativeSystemsRendered": true,
+    "initialRetention15": true,
+    "nativeInputChangedRetentionTo60": true,
+    "gatewayPrefsStored60": true,
+    "secondPairedClientSynced60WithoutReload": true,
+    "nativeHistoryToggleChangedLabelAndHint": true,
+    "nativeRouteLeaveAndReturnRetained60": true
+  },
+  "limits": [
+    "Published shell, not an exact-head native shell rebuild; the served Control UI and Gateway are exact-head.",
+    "Headless X11 display (Xvfb), private D-Bus, HOME, credential vault, and application profile. Not a Wayland compositor qualification.",
+    "Read-only CLI shim supplied isolated Gateway status and its genuine bootstrap URL; unexpected CLI actions were blocked. Preferences and authentication used the real Gateway, not mocks.",
+    "No worker inventory was seeded for this Linux smoke; native rename/dismiss/expiry were not re-exercised. Existing paired/upgrade proof covers the shared controllers separately.",
+    "Ctrl+R was sent but did not establish a document reload; no native full-reload/restart claim. Route leave/return was actually observed.",
+    "Screenshot is a directly captured native-window control region, excluding personal host/profile details."
+  ]
+}
