@@ -566,6 +566,54 @@ describe("Systems workspace", () => {
     expect(names()).toContain("Preparing worker");
   });
 
+  it("distinguishes same-profile workers beside their lifecycle status", async () => {
+    const first: EnvironmentSummary = {
+      id: "worker:abcdef123456",
+      type: "worker",
+      status: "available",
+      worker: {
+        providerId: "crabbox",
+        profileId: "cad-apple",
+        leaseId: "lease:first",
+        state: "attached",
+        ageMs: 3_000,
+        attachedSessionIds: [],
+        tunnelStatus: "connected",
+      },
+    };
+    const second: EnvironmentSummary = {
+      ...first,
+      id: "worker:123456abcdef",
+      worker: { ...first.worker!, leaseId: "lease:second" },
+    };
+    const { controller } = harness(async () => [host, first, second]);
+    const { sidebar } = await mount(controller);
+    const workerButtons = () =>
+      [...sidebar.querySelectorAll<HTMLButtonElement>(".systems-machine")].filter(
+        (button) =>
+          button.querySelector(".systems-machine__name")?.textContent === "crabbox · cad-apple",
+      );
+    const buttons = workerButtons();
+    expect(buttons).toHaveLength(2);
+    expect(
+      buttons.map((button) => button.querySelector(".systems-machine__meta")?.textContent?.trim()),
+    ).toEqual(["123456 · Attached", "abcdef · Attached"]);
+    buttons[0].click();
+    expect(controller.selectedId).toBe(second.id);
+    buttons[1].click();
+    expect(controller.selectedId).toBe(first.id);
+
+    first.status = "unavailable";
+    first.worker = { ...first.worker!, state: "destroyed", tunnelStatus: "stopped" };
+    await controller.refresh("manual");
+    await sidebar.updateComplete;
+    expect(
+      workerButtons().map((button) =>
+        button.querySelector(".systems-machine__meta")?.textContent?.trim(),
+      ),
+    ).toEqual(["123456 · Attached", "abcdef · Destroyed"]);
+  });
+
   it("separates recent worker history and shows lifecycle details and errors", async () => {
     const failedWorker: EnvironmentSummary = {
       id: "worker:failed:cad",
@@ -649,7 +697,7 @@ describe("Systems workspace", () => {
       [...sidebar.querySelectorAll(".systems-machine__meta")].map((entry) =>
         entry.textContent?.trim(),
       ),
-    ).toEqual(["Linux", "Destroying", "Failed", "Destroyed"]);
+    ).toEqual(["Linux", "cad · Destroying", "cad · Failed", "cad · Destroyed"]);
 
     controller.select(failedWorker.id);
     controller.toggleDetails();

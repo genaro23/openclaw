@@ -91,6 +91,11 @@ export function systemStatus(row: SystemsInventoryRow): string {
   );
 }
 
+/** Stable display fragment; selection continues to use the full environment ID. */
+function shortId(id: string): string {
+  return id.slice(id.lastIndexOf(":") + 1, id.lastIndexOf(":") + 7);
+}
+
 function isWorkerHistory(row: SystemsInventoryRow): boolean {
   const state = row.environment.worker?.state;
   return state === "destroyed" || state === "failed";
@@ -167,7 +172,7 @@ class SystemsSidebar extends OpenClawLightDomElement {
         <i class="systems-machine__dot" aria-hidden="true"></i>
         <span class="systems-machine__name">${systemName(row)}</span>
         <span class="systems-machine__meta"
-          >${row.environment.worker ? status : !online ? status : (platform ?? nothing)}</span
+          >${row.environment.worker ? `${shortId(row.environment.id)} · ${status}` : !online ? status : (platform ?? nothing)}</span
         >
         ${
           row.environment.desktop
